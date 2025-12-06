@@ -1,0 +1,29 @@
+name: 'Git Diff Filter'
+description: 'Analyzes git diff to determine which parts of the code changed'
+author: 'Your Organization'
+
+branding:
+  icon: 'filter'
+  color: 'blue'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Download and install gdf
+      shell: bash
+      run: |
+        VERSION="${GITHUB_ACTION_REF#v}"
+        if [ -z "$VERSION" ] || [ "$VERSION" = "$GITHUB_ACTION_REF" ]; then
+          VERSION="latest"
+        fi
+        
+        REPO="$GITHUB_ACTION_REPOSITORY"
+        BINARY_URL="https://github.com/${REPO}/releases/download/v${VERSION}/gdf-linux-x86_64"
+        
+        echo "Downloading gdf from ${BINARY_URL}"
+        curl -L "${BINARY_URL}" -o gdf
+        chmod +x gdf
+        sudo mv gdf /usr/local/bin/
+        
+        echo "gdf installed successfully"
+        gdf --version || echo "gdf v${VERSION}"
