@@ -25,20 +25,20 @@ Build `gdf` feature-by-feature with 100% test coverage at each step. Each featur
 
 ---
 
-### 1.2 Environment Variable Handling
+### 1.2 ~~Environment Variable Handling~~ ✅
 **Goal**: Read and merge environment variables with CLI args
 
 **Features**:
-- [ ] Read `BASE_REF` from environment
-- [ ] CLI flag `-b` overrides `BASE_REF` env var
-- [ ] Read `GITHUB_OUTPUT` from environment (for file writing)
+- [x] ~~Read `BASE_REF` from environment~~
+- [x] ~~CLI flag `-b` overrides `BASE_REF` env var~~
+- [x] ~~Read `GITHUB_OUTPUT` from environment (for file writing)~~
 
 **Acceptance Criteria**:
-- [ ] Uses `BASE_REF` when `-b` not provided
-- [ ] CLI `-b` overrides `BASE_REF`
-- [ ] Errors if neither provided
-- [ ] Detects `GITHUB_OUTPUT` file path
-- [ ] 100% test coverage
+- [x] ~~Uses `BASE_REF` when `-b` not provided~~
+- [x] ~~CLI `-b` overrides `BASE_REF`~~
+- [x] ~~Errors if neither provided~~
+- [x] ~~Detects `GITHUB_OUTPUT` file path~~
+- [x] ~~100% test coverage~~
 
 ---
 
@@ -328,7 +328,7 @@ Build `gdf` feature-by-feature with 100% test coverage at each step. Each featur
 ## Implementation Order Summary
 
 1. [x] ~~CLI parsing~~
-2. [ ] Environment variables
+2. [x] ~~Environment variables~~
 3. [ ] Error handling
 4. [ ] Git integration
 5. [ ] Basic glob (`*`, `?`, literals)

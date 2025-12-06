@@ -1,6 +1,7 @@
 use std::process;
 
 mod cli;
+mod config;
 
 fn main() {
     let result= run();
@@ -15,9 +16,10 @@ fn main() {
 }
 
 fn run() -> Result<(), String> {
-    let args: cli::Args = cli::parse_args()?;
+    let args = cli::parse_args()?;
+    let config = config::from_args(args)?;
 
-    println!("Parsed args: {:?}", args);
+    println!("Config: {:?}", config);
 
     Ok(())
 }
