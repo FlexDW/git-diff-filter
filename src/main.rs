@@ -2,6 +2,7 @@ use std::process;
 
 mod cli;
 mod config;
+mod git;
 
 fn main() {
     let result= run();
@@ -19,7 +20,18 @@ fn run() -> Result<(), String> {
     let args = cli::parse_args()?;
     let config = config::from_args(args)?;
 
-    println!("Config: {:?}", config);
+    // Get changed files
+    let changed_files = git::get_changed_files(&config.base_ref)?;
+
+    // Debug output
+    eprintln!(
+        "Comparing: {}..HEAD | Files changed: {}",
+        config.base_ref,
+        changed_files.len()
+    );
+    for file in &changed_files {
+        eprintln!("  {}", file);
+    }
 
     Ok(())
 }
