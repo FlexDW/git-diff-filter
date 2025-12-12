@@ -13,7 +13,7 @@ pub struct Args {
 /// Parse command-line arguments from environment
 pub fn parse_args() -> Result<Args, String> {
     let args: Vec<String> = env::args().skip(1).collect(); // Skip program name
-    parse_args_from_vec(&args) 
+    parse_args_from_vec(&args)
 }
 
 /// Parse arguments from a vector (for testing)
@@ -30,36 +30,35 @@ fn parse_args_from_vec(args: &[String]) -> Result<Args, String> {
             "-p" | "--pattern" => {
                 i += 1;
                 if i >= args.len() {
-                    return Err(format!("{} requires a value", arg));
+                    return Err(format!("{arg} requires a value"));
                 }
                 patterns.push(args[i].clone());
             }
             "-b" | "--base-ref" => {
                 i += 1;
                 if base_ref.is_some() {
-                    return Err(format!("{} can only be specified once", arg));
+                    return Err(format!("{arg} can only be specified once"));
                 }
                 if i >= args.len() {
-                    return Err(format!("{} requires a value", arg));
+                    return Err(format!("{arg} requires a value"));
                 }
                 base_ref = Some(args[i].clone());
             }
             "-g" | "--github-output" => {
                 i += 1;
                 if github_output.is_some() {
-                    return Err(format!("{} can only be specified once", arg));
+                    return Err(format!("{arg} can only be specified once"));
                 }
                 if i >= args.len() {
-                    return Err(format!("{} requires a value", arg));
+                    return Err(format!("{arg} requires a value"));
                 }
                 github_output = Some(args[i].clone());
             }
             _ => {
                 if arg.starts_with('-') {
-                    return Err(format!("Unknown flag: {}", arg));
-                } else {
-                    return Err(format!("Unexpected argument: {}", arg));
+                    return Err(format!("Unknown flag: {arg}"));
                 }
+                return Err(format!("Unexpected argument: {arg}"));
             }
         }
         i += 1;
@@ -232,19 +231,13 @@ mod tests {
     #[test]
     fn test_error_duplicate_base_ref() {
         let result = parse(&["-p", "*.txt", "-b", "main", "-b", "develop"]);
-        assert_eq!(
-            result,
-            Err("-b can only be specified once".to_string())
-        );
+        assert_eq!(result, Err("-b can only be specified once".to_string()));
     }
 
     #[test]
     fn test_error_duplicate_github_output() {
         let result = parse(&["-p", "*.txt", "-g", "api", "-g", "service"]);
-        assert_eq!(
-            result,
-            Err("-g can only be specified once".to_string())
-        );
+        assert_eq!(result, Err("-g can only be specified once".to_string()));
     }
 
     #[test]

@@ -6,6 +6,23 @@ A command-line utility for detecting changes in a monorepo by comparing git diff
 
 `gdf` analyzes git diffs to determine which parts of the code changed, helping workflows decide whether to run specific jobs or steps. It performs glob pattern matching against git diffs to flag which components of a monorepo have been modified.
 
+## Pattern Support
+
+### Implemented
+- `*` - Match zero or more characters (except `/`)
+- `?` - Match single character (except `/`)
+- `**` - Match zero or more directories (globstar)
+- `[abc]` - Character classes (match any character in set)
+- `[a-z]` - Character ranges (match character in range)
+- `[!abc]` - Negated character classes (match any character NOT in set)
+- `\` - Escape special characters
+
+### Not Yet Implemented
+- `!pattern` - Negation/exclusion patterns (planned)
+- `/pattern` - Root anchoring (planned)
+- `pattern/` - Directory-only matching (planned)
+- `{js,ts}` - Brace expansion (**OUT OF SCOPE** - use multiple `-p` flags instead)
+
 ## Usage
 
 ```bash
@@ -238,19 +255,19 @@ This format is automatically written to `$GITHUB_OUTPUT` (if the environment var
 
 - Gitignore-style glob pattern matching
 - Patterns are matched against relative file paths from repository root
-- Supported patterns:
+- **Supported patterns**:
   - `**` - Match any number of directories (e.g., `src/**/*.rs`)
   - `*` - Match any characters except `/` (e.g., `*.json`)
   - `?` - Match single character (e.g., `file?.txt`)
   - `[abc]` - Match any character in brackets (e.g., `[Tt]est.txt`)
   - `[a-z]` - Match character range (e.g., `file[0-9].txt`)
   - `[!abc]` - Match any character NOT in brackets (e.g., `[!.]*.txt`)
-  - `{a,b}` - Match either a or b (e.g., `*.{js,ts}`)
-  - `!pattern` - Negate/exclude files matching pattern (e.g., `!*.md`)
-  - `/pattern` - Anchor pattern to root directory (e.g., `/README.md`)
-  - `pattern/` - Match directories only (e.g., `build/`)
   - `\` - Escape special characters (e.g., `\*.txt` matches literal `*.txt`)
-- Pattern order matters: negations are applied after inclusions
+- **Not yet supported** (planned for future versions):
+  - `!pattern` - Negate/exclude files matching pattern
+  - `/pattern` - Anchor pattern to root directory
+  - `pattern/` - Match directories only
+  - `{a,b}` - Brace expansion (OUT OF SCOPE - use multiple `-p` flags instead)
 - Matching is case-sensitive by default
 
 ### Error Handling

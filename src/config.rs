@@ -108,8 +108,10 @@ mod tests {
         let result = from_args(args);
         assert_eq!(
             result,
-            Err("BASE_REF must be provided via -b/--base-ref flag or BASE_REF environment variable"
-                .to_string())
+            Err(
+                "BASE_REF must be provided via -b/--base-ref flag or BASE_REF environment variable"
+                    .to_string()
+            )
         );
     }
 
@@ -201,7 +203,10 @@ mod tests {
         assert_eq!(config.patterns, vec!["*.rs", "*.md"]);
         assert_eq!(config.base_ref, "develop");
         assert_eq!(config.github_output_name, Some("my-api".to_string()));
-        assert_eq!(config.github_output_filepath, Some("/tmp/output".to_string()));
+        assert_eq!(
+            config.github_output_filepath,
+            Some("/tmp/output".to_string())
+        );
 
         unsafe {
             env::remove_var("BASE_REF");

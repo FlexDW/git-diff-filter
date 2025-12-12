@@ -86,100 +86,93 @@ Build `gdf` feature-by-feature with 100% test coverage at each step. Each featur
 
 ## Phase 3: Glob Pattern Matching
 
-### 3.1 Basic Glob Patterns
+### 3.1 ~~Basic Glob Patterns~~ ✅
 **Goal**: Implement simple glob matching
 
 **Features**:
-- [ ] `*` - Match any characters except `/`
-- [ ] `?` - Match single character
-- [ ] Literal string matching
+- [x] ~~`*` - Match any characters except `/`~~
+- [x] ~~`?` - Match single character~~
+- [x] ~~Literal string matching~~
 
 **Acceptance Criteria**:
-- [ ] `*.txt` matches `file.txt`, not `dir/file.txt`
-- [ ] `file?.txt` matches `file1.txt`, not `file.txt`
-- [ ] `README.md` matches exactly `README.md`
-- [ ] 100% test coverage
+- [x] ~~**Literal matching**: `README.md` matches exactly `README.md`, not `README.mdx`~~
+- [x] ~~**Star wildcard (`*`)**: 
+  - [x] ~~`*.txt` matches `file.txt`, `test.txt`, but not `dir/file.txt` (no slash)~~
+  - [x] ~~`file*` matches `file.txt`, `file123`, `file` (including empty)~~
+  - [x] ~~`*` matches `README.md`, `.hidden`, but not `dir/file.txt`~~
+  - [x] ~~`a*b` matches `ab`, `axxxb`, not `a/b`~~
+- [x] ~~**Question mark (`?`)**: 
+  - [x] ~~`file?.txt` matches `file1.txt`, `fileX.txt`, not `file.txt` or `file12.txt`~~
+  - [x] ~~`???` matches exactly 3 characters~~
+  - [x] ~~`test?.md` doesn't match `test/.md` (no slash)~~
+- [x] ~~**Mixed patterns**: `file*.txt` matches `file1.txt`, `file_test.txt`~~
+- [x] ~~**Path separators**: `*` and `?` don't match `/` character~~
+- [x] ~~**Escaping**: `\*` matches literal `*`, `\?` matches literal `?`~~
+- [x] ~~**Empty/edge cases**: empty pattern only matches empty string~~
+- [x] ~~100% test coverage~~
 
 **Implementation Notes**:
-- Create `fn matches_pattern(path: &str, pattern: &str) -> bool`
-- Handle edge cases (empty strings, etc.)
+- ~~Create `fn matches_pattern(path: &str, pattern: &str) -> bool`~~
+- ~~Handle edge cases (empty strings, etc.)~~
 
 ---
 
-### 3.2 Directory Wildcards (`**`)
+### 3.2 ~~Directory Wildcards (`**`)~~ ✅
 **Goal**: Match any number of directories
 
 **Features**:
-- [ ] `**` - Match zero or more directories
-- [ ] `src/**/*.rs` matches all `.rs` files under `src/`
-- [ ] `**/test.txt` matches `test.txt` at any level
+- [x] ~~`**` - Match zero or more directories~~
+- [x] ~~`src/**/*.rs` matches all `.rs` files under `src/`~~
+- [x] ~~`**/test.txt` matches `test.txt` at any level~~
 
 **Acceptance Criteria**:
-- [ ] `**/*.rs` matches `a/b/c/file.rs`
-- [ ] `src/**/*.rs` matches `src/x/y/file.rs`
-- [ ] `**/test.txt` matches `a/b/test.txt` and `test.txt`
-- [ ] 100% test coverage
+- [x] ~~`**/*.rs` matches `a/b/c/file.rs`~~
+- [x] ~~`src/**/*.rs` matches `src/x/y/file.rs`~~
+- [x] ~~`**/test.txt` matches `a/b/test.txt` and `test.txt`~~
+- [x] ~~100% test coverage~~
 
 ---
 
-### 3.3 Character Classes
+### 3.3 ~~Character Classes~~ ✅
 **Goal**: Support `[...]` character matching
 
 **Features**:
-- [ ] `[abc]` - Match any character in set
-- [ ] `[a-z]` - Match character range
-- [ ] `[!abc]` or `[^abc]` - Match any character NOT in set
-- [ ] Multiple ranges: `[a-zA-Z0-9]`
+- [x] ~~`[abc]` - Match any character in set~~
+- [x] ~~`[a-z]` - Match character range~~
+- [x] ~~`[!abc]` or `[^abc]` - Match any character NOT in set~~
+- [x] ~~Multiple ranges: `[a-zA-Z0-9]`~~
 
 **Acceptance Criteria**:
-- [ ] `file[0-9].txt` matches `file1.txt`, not `filea.txt`
-- [ ] `[Tt]est.txt` matches `Test.txt` and `test.txt`
-- [ ] `[!.]*.txt` matches files not starting with `.`
-- [ ] `[a-z]` matches lowercase letters
-- [ ] 100% test coverage
+- [x] ~~`file[0-9].txt` matches `file1.txt`, not `filea.txt`~~
+- [x] ~~`[Tt]est.txt` matches `Test.txt` and `test.txt`~~
+- [x] ~~`[!.]*.txt` matches files not starting with `.`~~
+- [x] ~~`[a-z]` matches lowercase letters~~
+- [x] ~~100% test coverage~~
 
 ---
 
-### 3.4 Brace Expansion
+### 3.4 Brace Expansion — ⚠️ **OUT OF SCOPE** ⚠️
 **Goal**: Support `{a,b}` alternatives
 
-**Features**:
+**STATUS: NOT IMPLEMENTED - OUT OF SCOPE FOR CURRENT VERSION**
+
+Brace expansion requires preprocessing patterns into multiple alternatives, which adds significant complexity. This feature is deferred to a future version.
+
+**Features** (deferred):
 - [ ] `{js,ts}` - Match either `js` or `ts`
 - [ ] Nested patterns: `*.{js,ts}` → `*.js` or `*.ts`
 
-**Acceptance Criteria**:
-- [ ] `*.{js,ts}` matches `file.js` and `file.ts`
-- [ ] `{a,b,c}` matches `a`, `b`, or `c`
-- [ ] 100% test coverage
+**In Scope (Current)**:
+- [x] ~~Panic with clear error message when `{` or `}` detected in pattern~~
+- [x] ~~Error message directs users to use multiple `-p` flags instead~~
 
-**Implementation Notes**:
-- Expand `{a,b}` into multiple patterns internally
-- Test each alternative
-
----
-
-### 3.5 Negation Patterns
-**Goal**: Support `!pattern` to exclude files
-
-**Features**:
-- [ ] `!pattern` - Exclude files matching pattern
-- [ ] Applied after inclusion patterns
-- [ ] Order matters: inclusions first, then exclusions
-
-**Acceptance Criteria**:
-- [ ] `-p 'src/**' -p '!*.md'` excludes markdown files from `src/`
-- [ ] `-p '*.txt' -p '!test.txt'` includes all `.txt` except `test.txt`
-- [ ] Negation only applies to previously matched files
-- [ ] 100% test coverage
-
-**Implementation Notes**:
-- Track included and excluded patterns separately
-- First apply inclusions to get candidates
-- Then apply exclusions to filter
+**Workaround**: Use multiple `-p` flags instead:
+- Instead of: `gdf -p '*.{js,ts}'`
+- Use: `gdf -p '*.js' -p '*.ts'`
 
 ---
 
-### 3.6 Anchoring and Directory Matching
+### 3.5 Anchoring and Directory Matching
 **Goal**: Support `/pattern` and `pattern/`
 
 **Features**:
@@ -195,26 +188,48 @@ Build `gdf` feature-by-feature with 100% test coverage at each step. Each featur
 
 ---
 
-## Phase 4: Output and Integration
-
-### 4.1 Match Detection
-**Goal**: Determine if any files match patterns
+### 3.6 Matcher Orchestration
+**Goal**: Implement multi-pattern matching with inclusion/exclusion logic
 
 **Features**:
-- [ ] Check all changed files against all patterns
-- [ ] Return `true` if ANY file matches ANY pattern (after exclusions)
-- [ ] Return `false` if no matches
+- [ ] Separate patterns into inclusion and exclusion lists
+- [ ] Patterns starting with `!` are exclusions, others are inclusions
+- [ ] Match all changed files against inclusion patterns first
+- [ ] Build set of matched file paths (deduplicated)
+- [ ] Remove file paths that match any exclusion pattern
+- [ ] Return `true` if any files remain after exclusions
 
 **Acceptance Criteria**:
-- [ ] Returns `true` when at least one file matches
-- [ ] Returns `false` when no files match
-- [ ] Handles empty file list (no changes)
-- [ ] Handles empty pattern list
+- [ ] **Single inclusion pattern**: `-p '*.txt'` matches `file.txt`
+- [ ] **Multiple inclusion patterns**: `-p '*.txt' -p '*.rs'` matches if ANY pattern matches
+- [ ] **Deduplication**: Same file matched by multiple patterns only counted once
+- [ ] **Simple exclusion**: `-p 'src/**' -p '!*.md'` includes all `src/` files except `.md`
+- [ ] **Order-independent exclusions**: Exclusions apply to all inclusion results regardless of order
+- [ ] **Exclusion only affects matched files**: `-p '!*.md'` by itself matches nothing (no inclusions)
+- [ ] **Multiple exclusions**: `-p 'src/**' -p '!*.md' -p '!*.txt'` excludes both `.md` and `.txt`
+- [ ] **Empty pattern list**: Returns `false` for any file
+- [ ] **Empty file list**: Returns `false` for any pattern
 - [ ] 100% test coverage
+
+**Implementation Notes**:
+- Create `fn matches_with_exclusions(files: &[String], patterns: &[String]) -> bool`
+- Separate patterns: `patterns.iter().partition(|p| p.starts_with('!'))`
+- Strip `!` prefix from exclusion patterns before matching
+- Use `HashSet` for deduplication of matched files
+- Exclusions processed after all inclusions collected
+- Can use all implemented pattern types (basic, **, [], {}, /, anchoring)
+
+**Current Implementation Status**:
+- ❌ Current code only does simple OR matching across patterns
+- ❌ No exclusion pattern handling
+- ❌ No deduplication
+- ✅ Basic single-pattern matching works
 
 ---
 
-### 4.2 Plain Output Mode
+## Phase 4: Output and Integration
+
+### 4.1 Plain Output Mode
 **Goal**: Output `true` or `false` to stdout
 
 **Features**:
@@ -229,7 +244,7 @@ Build `gdf` feature-by-feature with 100% test coverage at each step. Each featur
 
 ---
 
-### 4.3 GitHub Actions Output Mode
+### 4.2 GitHub Actions Output Mode
 **Goal**: Write to `$GITHUB_OUTPUT` when `-g` flag provided
 
 **Features**:
@@ -324,17 +339,16 @@ Build `gdf` feature-by-feature with 100% test coverage at each step. Each featur
 
 1. [x] ~~CLI parsing~~
 2. [x] ~~Environment variables~~
-3. [ ] Error handling
-4. [ ] Git integration
-5. [ ] Basic glob (`*`, `?`, literals)
-6. [ ] Directory wildcards (`**`)
-7. [ ] Character classes (`[...]`)
-8. [ ] Brace expansion (`{a,b}`)
-9. [ ] Negation (`!pattern`)
-10. [ ] Anchoring (`/`, trailing `/`, escaping)
-11. [ ] Match detection
-12. [ ] Plain output mode
-13. [ ] GitHub Actions output mode
-14. [ ] Testing and polish
+3. [ ] Error handling (basic errors work, comprehensive error enum deferred)
+4. [x] ~~Git integration~~
+5. [x] ~~Basic glob (`*`, `?`, literals)~~
+6. [x] ~~Directory wildcards (`**`)~~
+7. [x] ~~Character classes (`[...]`)~~
+8. [ ] ~~Brace expansion (`{a,b}`)~~ **OUT OF SCOPE** - use multiple `-p` flags
+9. [ ] Anchoring (`/`, trailing `/`) - DEFERRED
+10. [ ] **Matcher orchestration (inclusion/exclusion/deduplication)** ← NEXT: Implement negation patterns
+11. [ ] Plain output mode
+12. [ ] GitHub Actions output mode
+13. [ ] Testing and polish
 
 Each feature must be fully implemented and tested before proceeding to the next.

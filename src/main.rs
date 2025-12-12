@@ -3,14 +3,15 @@ use std::process;
 mod cli;
 mod config;
 mod git;
+mod matcher;
 
 fn main() {
-    let result= run();
+    let result = run();
 
     match result {
-        Ok(_) => process::exit(0),
+        Ok(()) => process::exit(0),
         Err(e) => {
-            eprintln!("Error: {}", e);
+            eprintln!("Error: {e}");
             process::exit(1);
         }
     }
@@ -23,15 +24,25 @@ fn run() -> Result<(), String> {
     // Get changed files
     let changed_files = git::get_changed_files(&config.base_ref)?;
 
+    // Check if any files match the patterns
+    let mut has_match = false;
+    for file in &changed_files {
+        if matcher::matches_any(file, &config.patterns)? {
+            has_match = true;
+            break;
+        }
+    }
+
     // Debug output
     eprintln!(
-        "Comparing: {}..HEAD | Files changed: {}",
+        "Comparing: {}..HEAD | Patterns: {} | Match: {}",
         config.base_ref,
-        changed_files.len()
+        config.patterns.join(", "),
+        has_match
     );
-    for file in &changed_files {
-        eprintln!("  {}", file);
-    }
+
+    // Output result
+    println!("{has_match}");
 
     Ok(())
 }
