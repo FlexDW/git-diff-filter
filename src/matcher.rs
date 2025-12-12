@@ -407,18 +407,25 @@ fn extract_charset(pattern: &[u8], start_idx: usize) -> Result<(CharSet, usize),
                 idx += 1;
             }
             b']' => {
+                if items.is_empty() {
+                    return Err("Empty character class".to_string());
+                }
                 idx += 1;
                 return Ok((CharSet { items, negated }, idx));
             }
             _ => {
                 // Check for range
                 if idx + 2 < pattern.len() && pattern[idx + 1] == b'-' {
-                    if pattern[idx + 2] == b']' {
-                        return Err(format!("Incomplete range [{}-]", c as char));
-                    }
-
                     let start = c;
                     let end = pattern[idx + 2];
+
+                    if end == b']' {
+                        // Treat '-]' as literal dash followed by class end
+                        items.push(CharSetItem::Single(c));
+                        items.push(CharSetItem::Single(b'-'));
+                        idx += 2;
+                        continue;
+                    }
                     
                     if start > end {
                         return Err(format!("Invalid range [{}-{}]", start as char, end as char));
@@ -648,6 +655,320 @@ mod tests {
         // Verify escaping works (already tested elsewhere, but part of 3.5 spec)
         let result = match_batch("\\*.txt", &["*.txt", "file.txt"]).unwrap();
         assert_eq!(result, vec![true, false]);
+    }
+
+    // ========== Literal & prefix/suffix behaviour ==========
+
+    #[test]
+    fn test_literal_case_sensitive() {
+        let result = match_batch("readme.md", &["readme.md", "README.md", "docs/readme.md", "readme.mdx"]).unwrap();
+        assert_eq!(result, vec![true, false, false, false]);
+    }
+
+    #[test]
+    fn test_literal_path_with_prefix_suffix() {
+        let result = match_batch("src/main.rs", &["src/main.rs", "src/main.rs.bak", "a/src/main.rs", "src/main.rs/foo"]).unwrap();
+        assert_eq!(result, vec![true, false, false, true]);
+    }
+
+    #[test]
+    fn test_empty_pattern() {
+        let result = match_batch("", &["", "a", "foo/bar"]).unwrap();
+        assert_eq!(result, vec![true, false, false]);
+    }
+
+    // ========== Wildcard * (non-globstar, no slash crossing) ==========
+
+    #[test]
+    fn test_wildcard_between_literals() {
+        let result = match_batch("foo*bar", &["foobar", "foo_bar", "fooXXXbar", "foo/bar", "foo"]).unwrap();
+        assert_eq!(result, vec![true, true, true, false, false]);
+    }
+
+    #[test]
+    fn test_single_wildcard_pattern() {
+        let result = match_batch("*", &["", "a", "foo", "foo/bar"]).unwrap();
+        assert_eq!(result, vec![true, true, true, true]);
+    }
+
+    #[test]
+    fn test_wildcard_extension() {
+        let result = match_batch("*.rs", &["main.rs", "lib.rs", "src/main.rs", "main.r", ".rs"]).unwrap();
+        assert_eq!(result, vec![true, true, false, false, true]);
+    }
+
+    #[test]
+    fn test_wildcard_in_directory_path() {
+        let result = match_batch("src/*.rs", &["src/main.rs", "src/lib.rs", "src/a/main.rs", "src/.rs"]).unwrap();
+        assert_eq!(result, vec![true, true, false, true]);
+    }
+
+    #[test]
+    fn test_wildcard_any_extension() {
+        let result = match_batch("*.*", &["a.b", "a.", ".gitignore", "no_dot"]).unwrap();
+        assert_eq!(result, vec![true, true, true, false]);
+    }
+
+    #[test]
+    fn test_wildcard_config_files() {
+        let result = match_batch("config.*", &["config.toml", "config.json", "config", "configs.toml"]).unwrap();
+        assert_eq!(result, vec![true, true, false, false]);
+    }
+
+    // ========== Globstar ** vs * ==========
+
+    #[test]
+    fn test_globstar_rust_files() {
+        let result = match_batch("**/*.rs", &["main.rs", "src/lib.rs", "a/b/c.rs", "a/b.c", "src/dir/"]).unwrap();
+        assert_eq!(result, vec![true, true, true, false, false]);
+    }
+
+    #[test]
+    fn test_globstar_middle_of_path() {
+        let result = match_batch("src/**/mod.rs", &["src/mod.rs", "src/a/mod.rs", "src/a/b/mod.rs", "src/a/b/mod.rs.bak", "lib/mod.rs"]).unwrap();
+        assert_eq!(result, vec![true, true, true, false, false]);
+    }
+
+    #[test]
+    fn test_globstar_tests_directory() {
+        let result = match_batch("**/tests/*.rs", &["tests/test.rs", "src/tests/test.rs", "src/a/tests/test.rs", "src/tests/nested/test.rs", "tests/test.txt"]).unwrap();
+        assert_eq!(result, vec![true, true, true, false, false]);
+    }
+
+    #[test]
+    fn test_globstar_without_slash_wildcard_semantics() {
+        let result = match_batch("**.rs", &["main.rs", "src/main.rs", "a/b.rs", "a/b/c.rs"]).unwrap();
+        assert_eq!(result, vec![true, false, false, false]);
+    }
+
+    #[test]
+    fn test_globstar_cargo_toml() {
+        let result = match_batch("**/Cargo.toml", &["Cargo.toml", "src/Cargo.toml", "a/b/Cargo.toml", "Cargo.toml.bak"]).unwrap();
+        assert_eq!(result, vec![true, true, true, false]);
+    }
+
+    #[test]
+    fn test_globstar_directory_prefix() {
+        let result = match_batch("src/**", &["src", "src/", "src/main.rs", "src/a/b/c", "srcx", "srcx/a"]).unwrap();
+        assert_eq!(result, vec![false, true, true, true, false, false]);
+    }
+
+    // ========== Leading / stripping ==========
+
+    #[test]
+    fn test_leading_slash_stripped() {
+        let result = match_batch("/src/lib.rs", &["src/lib.rs", "a/src/lib.rs", "/src/lib.rs"]).unwrap();
+        assert_eq!(result, vec![true, false, false]);
+    }
+
+    #[test]
+    fn test_leading_slash_with_wildcard_root() {
+        let result = match_batch("/*", &["foo", "bar", "dir/foo", "/foo"]).unwrap();
+        assert_eq!(result, vec![true, true, true, true]);
+    }
+
+    #[test]
+    fn test_leading_slash_with_globstar_pattern() {
+        let result = match_batch("/src/**/*.rs", &["src/main.rs", "src/a/b.rs", "lib/src/main.rs"]).unwrap();
+        assert_eq!(result, vec![true, true, false]);
+    }
+
+    // ========== Trailing / stripping & directory prefix semantics ==========
+
+    #[test]
+    fn test_trailing_slash_directory_prefix() {
+        let result = match_batch("build/", &["build", "build/", "build/output.txt", "build/dist/app.js", "buildx", "buildx/output.txt"]).unwrap();
+        assert_eq!(result, vec![true, true, true, true, false, false]);
+    }
+
+    #[test]
+    fn test_trailing_slash_logs_directory() {
+        let result = match_batch("logs/", &["logs", "logs/", "logs/app.log", "var/logs/app.log"]).unwrap();
+        assert_eq!(result, vec![true, true, true, false]);
+    }
+
+    #[test]
+    fn test_directory_prefix_without_trailing_slash() {
+        let result = match_batch("src/bin", &["src/bin", "src/bin/main.rs", "src/binx", "src/bi"]).unwrap();
+        assert_eq!(result, vec![true, true, false, false]);
+    }
+
+    #[test]
+    fn test_leading_and_trailing_slash_dist() {
+        let result = match_batch("/dist/", &["dist", "dist/app.js", "dist/css/app.css", "src/dist/app.js"]).unwrap();
+        assert_eq!(result, vec![true, true, true, false]);
+    }
+
+    // ========== Mixed * + ** + literals ==========
+
+    #[test]
+    fn test_mixed_globstar_wildcard_suffix() {
+        let result = match_batch("src/**/tests/*_test.rs", &["src/tests/foo_test.rs", "src/a/tests/bar_test.rs", "src/a/b/tests/baz_test.rs", "src/tests/foo.rs", "tests/foo_test.rs"]).unwrap();
+        assert_eq!(result, vec![true, true, true, false, false]);
+    }
+
+    #[test]
+    fn test_mixed_globstar_with_nested_wildcard() {
+        let result = match_batch("**/src/*/*.rs", &["src/a/main.rs", "a/src/b/main.rs", "a/b/src/c/main.rs", "src/main.rs"]).unwrap();
+        assert_eq!(result, vec![true, true, true, false]);
+    }
+
+    #[test]
+    fn test_mixed_globstar_target_directory() {
+        let result = match_batch("**/target/**", &["target", "target/debug/app", "a/target/debug/app", "a/b/target", "targets/debug/app"]).unwrap();
+        assert_eq!(result, vec![false, true, true, false, false]);
+    }
+
+    // ========== Character classes [ ], ranges, negation ==========
+
+    #[test]
+    fn test_charset_double_digit() {
+        let result = match_batch("file[0-9][0-9].txt", &["file00.txt", "file01.txt", "file9.txt", "fileab.txt", "file99.txt"]).unwrap();
+        assert_eq!(result, vec![true, true, false, false, true]);
+    }
+
+    #[test]
+    fn test_charset_lowercase_range() {
+        let result = match_batch("[a-z].rs", &["a.rs", "z.rs", "A.rs", "aa.rs", "_.rs"]).unwrap();
+        assert_eq!(result, vec![true, true, false, false, false]);
+    }
+
+    #[test]
+    fn test_charset_uppercase_double() {
+        let result = match_batch("[A-Z][A-Z].log", &["AB.log", "ZZ.log", "A1.log", "A.log", "abc.log"]).unwrap();
+        assert_eq!(result, vec![true, true, false, false, false]);
+    }
+
+    #[test]
+    fn test_charset_negated_digit() {
+        let result = match_batch("test[!0-9].rs", &["testa.rs", "test_.rs", "test0.rs", "test9.rs", "test.rs"]).unwrap();
+        assert_eq!(result, vec![true, true, false, false, false]);
+    }
+
+    #[test]
+    fn test_charset_negated_lowercase() {
+        let result = match_batch("data[!a-z].bin", &["data1.bin", "data_.bin", "dataa.bin", "dataz.bin"]).unwrap();
+        assert_eq!(result, vec![true, true, false, false]);
+    }
+
+    #[test]
+    fn test_charset_slash_or_dash() {
+        let result = match_batch("path[/-]sep", &["path/sep", "path-sep", "pathxsep"]).unwrap();
+        assert_eq!(result, vec![true, true, false]);
+    }
+
+    #[test]
+    fn test_charset_hex_digit() {
+        let result = match_batch("img[0-9a-f].png", &["img0.png", "img9.png", "imga.png", "imgf.png", "imgg.png"]).unwrap();
+        assert_eq!(result, vec![true, true, true, true, false]);
+    }
+
+    #[test]
+    fn test_charset_negated_exclamation() {
+        let err = match_batch("config[!].yml", &["config!.yml", "configa.yml", "config1.yml"]).expect_err("expected empty character class to error");
+        assert!(err.contains("Empty"));
+    }
+
+    // ========== Escaping within charsets and literals ==========
+
+    #[test]
+    fn test_charset_escaped_open_bracket() {
+        let result = match_batch("foo[\\[]bar", &["foo[bar", "foo]bar", "foo\\bar"]).unwrap();
+        assert_eq!(result, vec![true, false, false]);
+    }
+
+    #[test]
+    fn test_charset_escaped_close_bracket() {
+        let result = match_batch("foo[\\]]bar", &["foo]bar", "foo[bar", "foobar"]).unwrap();
+        assert_eq!(result, vec![true, false, false]);
+    }
+
+    #[test]
+    fn test_charset_escaped_dash_literal() {
+        let result = match_batch("range[a\\-c]", &["rangea", "range-", "rangec", "rangeb"]).unwrap();
+        assert_eq!(result, vec![true, true, true, false]);
+    }
+
+    #[test]
+    fn test_charset_escaped_backslash_literal() {
+        let result = match_batch("backslash[\\\\]end", &["backslash\\end", "backslash/end", "backslashxend"]).unwrap();
+        assert_eq!(result, vec![true, false, false]);
+    }
+
+    #[test]
+    fn test_literal_escaped_asterisk() {
+        let result = match_batch("literal\\*star", &["literal*star", "literal\\*star", "literalXstar"]).unwrap();
+        assert_eq!(result, vec![true, false, false]);
+    }
+
+    #[test]
+    fn test_literal_escaped_brackets() {
+        let result = match_batch("dir\\[test\\]", &["dir[test]", "dirXtest]", "dir[test"]).unwrap();
+        assert_eq!(result, vec![true, false, false]);
+    }
+
+    // ========== Invalid / error-case patterns ==========
+
+    #[test]
+    fn test_error_trailing_backslash_only() {
+        let err = match_batch("\\", &["x"]).expect_err("expected trailing backslash error");
+        assert!(err.contains("backslash"));
+    }
+
+    #[test]
+    fn test_error_trailing_backslash() {
+        let err = match_batch("foo\\", &["foo\\", "foo"]).expect_err("expected trailing backslash error");
+        assert!(err.contains("backslash"));
+    }
+
+    #[test]
+    fn test_error_unclosed_range() {
+        let err = match_batch("[a-", &["a"]).expect_err("expected unclosed range error");
+        assert!(err.contains("Unclosed") || err.contains("range") || err.contains("ends with '-'"));
+    }
+
+    #[test]
+    fn test_error_invalid_range_order() {
+        let err = match_batch("[z-a]", &["m"]).expect_err("expected invalid range order error");
+        assert!(err.contains("Invalid range"));
+    }
+
+    #[test]
+    fn test_error_unclosed_charset() {
+        let err = match_batch("foo[", &["foo["]).expect_err("expected unclosed charset error");
+        assert!(err.contains("Unclosed"));
+    }
+
+    #[test]
+    fn test_error_charset_trailing_backslash() {
+        let err = match_batch("foo[\\]", &["foo\\"]).expect_err("expected charset trailing backslash error");
+        assert!(err.contains("backslash") || err.contains("Unclosed"));
+    }
+
+    #[test]
+    fn test_error_charset_only_negation() {
+        let err = match_batch("[!]", &["!"]).expect_err("expected negation-only charset error");
+        assert!(err.contains("Empty"));
+    }
+
+    // ========== Mixed directory & charsets ==========
+
+    #[test]
+    fn test_charset_in_directory_name() {
+        let result = match_batch("src/[a-z]*/mod.rs", &["src/a/mod.rs", "src/abc/mod.rs", "src/A/mod.rs", "src//mod.rs", "src/mod.rs"]).unwrap();
+        assert_eq!(result, vec![true, true, false, false, false]);
+    }
+
+    #[test]
+    fn test_charset_negated_in_filename() {
+        let result = match_batch("src/[!t]est.rs", &["src/aest.rs", "src/test.rs", "src/zest.rs"]).unwrap();
+        assert_eq!(result, vec![true, false, true]);
+    }
+
+    #[test]
+    fn test_charset_with_globstar() {
+        let result = match_batch("[a-z]/**/main.rs", &["a/main.rs", "a/src/main.rs", "z/a/b/main.rs", "A/main.rs"]).unwrap();
+        assert_eq!(result, vec![true, true, true, false]);
     }
 }
 
