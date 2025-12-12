@@ -69,7 +69,12 @@ pub fn match_batch(pattern: &str, strings: &[&str]) -> Result<Vec<bool>, String>
         })
         .collect();
 
-    let pattern_bytes: &[u8] = pattern.as_bytes();
+    // Strip leading / from pattern since git diff paths don't have leading slashes
+    // Strip trailing / from pattern - as we already match directories
+    let normalized_pattern = pattern.strip_prefix('/').unwrap_or(pattern);
+    let normalized_pattern = normalized_pattern.strip_suffix('/').unwrap_or(normalized_pattern);
+    let pattern_bytes: &[u8] = normalized_pattern.as_bytes();
+
     let mut pattern_idx: usize = 0;
 
     while pattern_idx < pattern_bytes.len() && !active.is_empty() {
@@ -597,4 +602,52 @@ mod tests {
         let result = match_batch("test[\\\\]", &["test\\", "testa", "testx"]).unwrap();
         assert_eq!(result, vec![true, false, false]);
     }
+
+    // Section 3.5: Anchoring and Directory Matching
+
+    #[test]
+    fn test_leading_slash_anchor_root() {
+        // Leading / is stripped - pattern matches at root level only
+        let result = match_batch("/README.md", &["README.md", "dir/README.md", "a/b/README.md"]).unwrap();
+        assert_eq!(result, vec![true, false, false]);
+    }
+
+    #[test]
+    fn test_leading_slash_with_wildcard() {
+        let result = match_batch("/*.txt", &["file.txt", "test.txt", "dir/file.txt"]).unwrap();
+        assert_eq!(result, vec![true, true, false]);
+    }
+
+    #[test]
+    fn test_leading_slash_with_directory() {
+        let result = match_batch("/src/main.rs", &["src/main.rs", "lib/src/main.rs"]).unwrap();
+        assert_eq!(result, vec![true, false]);
+    }
+
+    #[test]
+    fn test_trailing_slash_directory_matching() {
+        // Pattern ending in / matches directory and all contents
+        let result = match_batch("build/", &["build/output.txt", "build/dist/app.js", "buildx/file.txt"]).unwrap();
+        assert_eq!(result, vec![true, true, false]);
+    }
+
+    #[test]
+    fn test_trailing_slash_with_globstar() {
+        let result = match_batch("**/build/", &["build/file.txt", "src/build/output.js", "a/b/c/build/dist/x.txt"]).unwrap();
+        assert_eq!(result, vec![true, true, true]);
+    }
+
+    #[test]
+    fn test_leading_and_trailing_slash() {
+        let result = match_batch("/dist/", &["dist/bundle.js", "dist/css/main.css", "src/dist/file.txt"]).unwrap();
+        assert_eq!(result, vec![true, true, false]);
+    }
+
+    #[test]
+    fn test_escaped_literal_asterisk() {
+        // Verify escaping works (already tested elsewhere, but part of 3.5 spec)
+        let result = match_batch("\\*.txt", &["*.txt", "file.txt"]).unwrap();
+        assert_eq!(result, vec![true, false]);
+    }
 }
+

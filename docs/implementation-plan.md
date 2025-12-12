@@ -172,19 +172,19 @@ Brace expansion requires preprocessing patterns into multiple alternatives, whic
 
 ---
 
-### 3.5 Anchoring and Directory Matching
+### 3.5 ~~Anchoring and Directory Matching~~ ✅
 **Goal**: Support `/pattern` and `pattern/`
 
 **Features**:
-- [ ] `/pattern` - Anchor to root (match only at repo root)
-- [ ] `pattern/` - Match directories only
-- [ ] `\` - Escape special characters
+- [x] ~~`/pattern` - Anchor to root (match only at repo root)~~
+- [x] ~~`pattern/` - Match directories only~~
+- [x] ~~`\` - Escape special characters~~
 
 **Acceptance Criteria**:
-- [ ] `/README.md` matches `README.md`, not `dir/README.md`
-- [ ] `build/` matches directories named `build`
-- [ ] `\*.txt` matches literal `*.txt` filename
-- [ ] 100% test coverage
+- [x] ~~`/README.md` matches `README.md`, not `dir/README.md`~~
+- [x] ~~`build/` matches directories named `build`~~
+- [x] ~~`\*.txt` matches literal `*.txt` filename~~
+- [x] ~~100% test coverage~~
 
 ---
 
