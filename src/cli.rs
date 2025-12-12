@@ -81,7 +81,7 @@ mod tests {
     use super::*;
 
     fn parse(args: &[&str]) -> Result<Args, String> {
-        let args: Vec<String> = args.iter().map(|s| s.to_string()).collect();
+        let args: Vec<String> = args.iter().map(|&s| s.to_string()).collect();
         parse_args_from_vec(&args)
     }
 
