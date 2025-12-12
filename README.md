@@ -1,4 +1,4 @@
-# `gdf` CLI Tool
+# `gdf`
 
 A command-line utility for detecting changes in a monorepo by comparing git diffs against glob patterns. Designed to integrate seamlessly with GitHub Actions workflows but works in any CI/CD environment or local development.
 
@@ -8,20 +8,22 @@ A command-line utility for detecting changes in a monorepo by comparing git diff
 
 ## Pattern Support
 
-### Implemented
+### Fully Implemented
 - `*` - Match zero or more characters (except `/`)
-- `?` - Match single character (except `/`)
 - `**` - Match zero or more directories (globstar)
 - `[abc]` - Character classes (match any character in set)
 - `[a-z]` - Character ranges (match character in range)
-- `[!abc]` - Negated character classes (match any character NOT in set)
-- `\` - Escape special characters
+- `[!abc]` or `[^abc]` - Negated character classes (match any character NOT in set)
+- `\\` - Escape special characters (`\\*`, `\\?`, `\\[`, `\\]`, `\\\\`)
+- `!pattern` - Exclusion patterns (exclude files matching pattern)
+- `/pattern` - Root anchoring (match at repository root only)
+- `pattern/` - Directory prefix matching (match directory and all contents)
 
-### Not Yet Implemented
-- `!pattern` - Negation/exclusion patterns (planned)
-- `/pattern` - Root anchoring (planned)
-- `pattern/` - Directory-only matching (planned)
-- `{js,ts}` - Brace expansion (**OUT OF SCOPE** - use multiple `-p` flags instead)
+### Not Implemented
+- `?` - Match single character (not yet implemented, treated as literal `?`)
+- `{js,ts}` - Brace expansion (**out of scope** - use multiple `-p` flags instead)
+  - Instead of: `gdf -p '*.{js,ts}'`
+  - Use: `gdf -p '*.js' -p '*.ts'`
 
 ## Usage
 
@@ -55,11 +57,15 @@ gdf -p <glob> [-p <glob>...] [-b <base-ref>] [-g <name>]
 
 1. Reads the base reference from `--base-ref` flag or falls back to `BASE_REF` environment variable
 2. Executes `git diff --name-only $BASE_REF..HEAD` to get list of changed files
-3. For each glob pattern specified with `-p`:
-   - Matches the pattern against all changed files
-   - If any file matches, considers the component as changed
+3. Pattern matching logic:
+   - Separate patterns into inclusion patterns (no `!` prefix) and exclusion patterns (`!` prefix)
+   - Match all changed files against inclusion patterns first
+   - Build a set of matched file paths (deduplicated)
+   - Remove file paths that match any exclusion pattern
+   - Return `true` if any files remain after exclusions, `false` otherwise
+   - If no inclusion patterns provided, always returns `false`
 4. Output:
-   - **stderr**: Logs comparison info for debugging (e.g., `Comparing: main..HEAD`)
+   - **stderr**: Logs comparison info for debugging (e.g., `Comparing: main..HEAD | Patterns: src/** | Match: true`)
    - **stdout** (without `-g` flag): Outputs `true` or `false`
    - **stdout** (with `-g` flag): Outputs `<name>=true` or `<name>=false` AND writes to `$GITHUB_OUTPUT` file (if the environment variable exists)
 
@@ -99,17 +105,70 @@ gdf -p 'components/reporting/**'
 ### Multiple Glob Patterns
 
 ```bash
+# Match if any of these patterns match
 gdf -p 'libs/**' -p 'package.json' -p 'lerna.json' -b main
-# stderr: Comparing: main..HEAD | Patterns: libs/**, package.json, lerna.json | Match: false
-# stdout: false
+# stderr: Comparing: main..HEAD | Patterns: libs/**, package.json, lerna.json | Match: true
+# stdout: true
 ```
 
-### Excluding Files with Negation Patterns
+### Root-Anchored Patterns
+
+```bash
+# Match only at repository root (not in subdirectories)
+gdf -p '/README.md' -b main
+# Matches: README.md
+# Does NOT match: docs/README.md
+```
+
+### Directory Prefix Matching
+
+```bash
+# Match directory and all contents
+gdf -p 'build/' -b main
+# Matches: build, build/output.js, build/dist/app.css
+# Does NOT match: buildx/file.txt
+
+# Combine with globstar
+gdf -p '**/dist/' -b main
+# Matches: dist/app.js, src/dist/bundle.js, a/b/c/dist/main.css
+```
+
+### Excluding Files with Exclusion Patterns
 
 ```bash
 # Match all source files except markdown
-gdf -p 'graph-api/src/**' -p '!*.md' -b main
+gdf -p 'src/**' -p '!*.md' -b main
+# stderr: Comparing: main..HEAD | Patterns: src/**, !*.md | Match: true
 # stdout: true
+
+# Match files in src/ but exclude test directories and markdown
+gdf -p 'src/**' -p '!**/test/**' -p '!*.md' -b main
+# Matches .rs files but not .md or files in test/ subdirectories
+
+# Multiple exclusions are order-independent
+gdf -p '!*.md' -p 'src/**' -p '!*.txt' -b main
+# Same result regardless of order
+
+# Exclusions only affect matched files
+gdf -p '!*.md' -b main
+# Always returns false (no inclusions to match)
+```
+
+### Character Classes
+
+```bash
+# Match files with digits in name
+gdf -p 'file[0-9].txt' -b main
+# Matches: file1.txt, file5.txt
+# Does NOT match: filea.txt, file.txt
+
+# Match hexadecimal characters
+gdf -p 'img[0-9a-f].png' -b main
+# Matches: img0.png, img9.png, imga.png, imgf.png
+
+# Negated character class
+gdf -p '[!.]*.txt' -b main
+# Matches files not starting with dot
 ```
 
 ### Plain Boolean Check in Scripts
@@ -257,18 +316,25 @@ This format is automatically written to `$GITHUB_OUTPUT` (if the environment var
 - Patterns are matched against relative file paths from repository root
 - **Supported patterns**:
   - `**` - Match any number of directories (e.g., `src/**/*.rs`)
+    - Must be followed by `/` to cross directories: `**/test/*.rs`
+    - `**` without `/` behaves like `*` (doesn't cross directories)
   - `*` - Match any characters except `/` (e.g., `*.json`)
-  - `?` - Match single character (e.g., `file?.txt`)
   - `[abc]` - Match any character in brackets (e.g., `[Tt]est.txt`)
   - `[a-z]` - Match character range (e.g., `file[0-9].txt`)
-  - `[!abc]` - Match any character NOT in brackets (e.g., `[!.]*.txt`)
-  - `\` - Escape special characters (e.g., `\*.txt` matches literal `*.txt`)
-- **Not yet supported** (planned for future versions):
-  - `!pattern` - Negate/exclude files matching pattern
-  - `/pattern` - Anchor pattern to root directory
-  - `pattern/` - Match directories only
+  - `[!abc]` or `[^abc]` - Match any character NOT in brackets (e.g., `[!.]*.txt`)
+  - `\\` - Escape special characters (e.g., `\\*.txt` matches literal `*.txt`)
+  - `!pattern` - Exclude files matching pattern (must have inclusion patterns too)
+  - `/pattern` - Anchor pattern to root directory (e.g., `/README.md`)
+  - `pattern/` - Match directory and all contents (e.g., `build/`)
+- **Pattern behavior**:
+  - Leading `/` is stripped (anchors to root)
+  - Trailing `/` is stripped (matches directory prefix)
+  - Patterns can match directory prefixes: `src/bin` matches `src/bin/main.rs`
+  - Exclusions are order-independent and apply to all inclusion results
+- **Not supported**:
+  - `?` - Single character wildcard (not yet implemented)
   - `{a,b}` - Brace expansion (OUT OF SCOPE - use multiple `-p` flags instead)
-- Matching is case-sensitive by default
+- Matching is case-sensitive
 
 ### Error Handling
 
@@ -403,9 +469,14 @@ The CI will build and upload the binary to GitHub Releases.
 
 - Statically compiled Rust binary with minimal overhead
 - Single git diff execution per invocation
-- Efficient glob matching via compiled glob sets
+- Efficient batch matching algorithm:
+  - Single-pass state machine for pattern matching
+  - Processes all paths in parallel against each pattern
+  - Uses `swap_remove` optimization to minimize allocations
+  - Byte-level processing for control characters (no UTF-8 overhead)
 - No runtime dependencies or startup costs
 - Expected execution time: <100ms for typical monorepos
+- 138 comprehensive tests ensure correctness
 
 ## Dependencies
 
