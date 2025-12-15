@@ -11,6 +11,7 @@ A command-line utility for detecting changes in a monorepo by comparing git diff
 ### Fully Implemented
 - `*` - Match zero or more characters (except `/`)
 - `**` - Match zero or more directories (globstar)
+- `?` - Match exactly one character (except `/`)
 - `[abc]` - Character classes (match any character in set)
 - `[a-z]` - Character ranges (match character in range)
 - `[!abc]` or `[^abc]` - Negated character classes (match any character NOT in set)
@@ -20,7 +21,6 @@ A command-line utility for detecting changes in a monorepo by comparing git diff
 - `pattern/` - Directory prefix matching (match directory and all contents)
 
 ### Not Implemented
-- `?` - Match single character (not yet implemented, treated as literal `?`)
 - `{js,ts}` - Brace expansion (**out of scope** - use multiple `-p` flags instead)
   - Instead of: `gdf -p '*.{js,ts}'`
   - Use: `gdf -p '*.js' -p '*.ts'`
@@ -152,6 +152,30 @@ gdf -p '!*.md' -p 'src/**' -p '!*.txt' -b main
 # Exclusions only affect matched files
 gdf -p '!*.md' -b main
 # Always returns false (no inclusions to match)
+```
+
+### Question Mark Wildcard
+
+```bash
+# Match files with exactly one character before extension
+gdf -p 'file?.txt' -b main
+# Matches: file1.txt, fileA.txt, file_.txt
+# Does NOT match: file.txt, file12.txt
+
+# Multiple question marks
+gdf -p 'test??.rs' -b main
+# Matches: test01.rs, testab.rs
+# Does NOT match: test1.rs, test.rs, test123.rs
+
+# Question mark does not match /
+gdf -p 'src?main.rs' -b main
+# Matches: srcXmain.rs
+# Does NOT match: src/main.rs
+
+# Combine with other patterns
+gdf -p '*.?s' -b main
+# Matches: file.rs, test.ts, app.js
+# Does NOT match: style.css
 ```
 
 ### Character Classes
@@ -319,6 +343,7 @@ This format is automatically written to `$GITHUB_OUTPUT` (if the environment var
     - Must be followed by `/` to cross directories: `**/test/*.rs`
     - `**` without `/` behaves like `*` (doesn't cross directories)
   - `*` - Match any characters except `/` (e.g., `*.json`)
+  - `?` - Match exactly one character except `/` (e.g., `file?.txt`)
   - `[abc]` - Match any character in brackets (e.g., `[Tt]est.txt`)
   - `[a-z]` - Match character range (e.g., `file[0-9].txt`)
   - `[!abc]` or `[^abc]` - Match any character NOT in brackets (e.g., `[!.]*.txt`)
@@ -332,7 +357,6 @@ This format is automatically written to `$GITHUB_OUTPUT` (if the environment var
   - Patterns can match directory prefixes: `src/bin` matches `src/bin/main.rs`
   - Exclusions are order-independent and apply to all inclusion results
 - **Not supported**:
-  - `?` - Single character wildcard (not yet implemented)
   - `{a,b}` - Brace expansion (OUT OF SCOPE - use multiple `-p` flags instead)
 - Matching is case-sensitive
 

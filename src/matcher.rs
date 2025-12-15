@@ -42,6 +42,35 @@ impl ActiveString<'_> {
     }
 }
 
+/// Consume one byte from each active string based on a predicate.
+/// Strings matching the predicate advance; others are marked false and removed.
+fn consume_byte<F>(active: &mut Vec<ActiveString>, results: &mut [bool], predicate: F)
+where
+    F: Fn(Option<u8>) -> bool,
+{
+    let mut i: usize = 0;
+    while i < active.len() {
+        let string: &mut ActiveString<'_> = &mut active[i];
+        if predicate(string.current_byte()) {
+            string.advance();
+            i += 1;
+        } else {
+            results[string.original_idx] = false;
+            active.swap_remove(i);
+        }
+    }
+}
+
+/// Pattern matching state machine
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum PatternState {
+    Literal,              // Normal character-by-character matching
+    InWildcard,           // Seen *, determining what kind
+    InPossibleGlobstar,   // Seen **, determining if **/
+    InGlobstar,           // Confirmed **/, ready to match
+    InSuperWild,          // Confirmed **/*,  ready to match
+}
+
 /// Match multiple strings against a single glob pattern
 ///
 /// Matching is done on byte arrays as control characters are all single-byte ASCII
@@ -78,162 +107,282 @@ pub fn match_batch(pattern: &str, strings: &[&str]) -> Result<Vec<bool>, String>
     let pattern_bytes: &[u8] = normalized_pattern.as_bytes();
 
     let mut pattern_idx: usize = 0;
+    let mut pattern_state = PatternState::Literal;
+    let mut question_count: usize = 0;
 
     while pattern_idx < pattern_bytes.len() && !active.is_empty() {
         let c: u8 = pattern_bytes[pattern_idx];
 
         match c {
-            b'\\' => {
-                // Escape next character
-                if pattern_idx + 1 >= pattern_bytes.len() {
-                    return Err("Pattern ends with backslash".to_string());
-                }
-                pattern_idx += 1;
-                let escaped: u8 = pattern_bytes[pattern_idx];
-
-                // Match literal byte against all active strings
-                let mut i: usize = 0;
-                while i < active.len() {
-                    let string: &mut ActiveString<'_> = &mut active[i];
-
-                    match string.current_byte() {
-                        Some(b) if b == escaped => {
-                            // Still matching - advance position
-                            string.advance();
-                            i += 1;
-                        }
-                        _ => {
-                            // Failed - mark result and remove from active
-                            results[string.original_idx] = false;
-                            active.swap_remove(i);
-                            // Don't increment i - check what was swapped in
-                        }
-                    }
-                }
-
-                pattern_idx += 1;
-            }
             b'*' => {
-                // Check for globstar
-                if pattern_idx + 1 < pattern_bytes.len() && pattern_bytes[pattern_idx + 1] == b'*' {
-                    // Globstar **
-                    pattern_idx += 2;
-
-                    // Skip any additional *
-                    // Unlikely but also unclear what to do if we encountered so just treat as **
-                    while pattern_idx < pattern_bytes.len() && pattern_bytes[pattern_idx] == b'*' {
+                match pattern_state {
+                    PatternState::Literal => {
+                        pattern_state = PatternState::InWildcard;
                         pattern_idx += 1;
                     }
-
-                    // Check if followed by / (true globstar - crosses directories)
-                    if pattern_idx < pattern_bytes.len() && pattern_bytes[pattern_idx] == b'/' {
-                        // Skip the / (don't include in anchor)
+                    PatternState::InWildcard => {
+                        pattern_state = PatternState::InPossibleGlobstar;
                         pattern_idx += 1;
-
-                        // Skip any additional / or * (like **/ or **/**)
-                        while pattern_idx < pattern_bytes.len()
-                            && (pattern_bytes[pattern_idx] == b'/'
-                                || pattern_bytes[pattern_idx] == b'*')
-                        {
-                            pattern_idx += 1;
-                        }
-
-                        // Match globstar with next segment (up to next *)
-                        let next_pattern_idx = match_wildcard_segment(
-                            pattern_bytes,
-                            pattern_idx,
-                            &mut active,
-                            &mut results,
-                            true, // globstar mode
-                        )?;
-
-                        pattern_idx = next_pattern_idx;
-                    } else {
-                        // ** NOT followed by / - use wildcard semantics (doesn't cross directories)
+                    }
+                    PatternState::InPossibleGlobstar => {
+                        // Stay in InPossibleGlobstar (handles ***, ****, etc.)
+                        pattern_idx += 1;
+                    }
+                    PatternState::InGlobstar => {
+                        pattern_state = PatternState::InSuperWild;
+                        pattern_idx += 1;
+                    }
+                    PatternState::InSuperWild => {
+                        // Stay in InSuperWild
+                        pattern_idx += 1;
+                    }
+                }
+            }
+            b'/' => {
+                match pattern_state {
+                    PatternState::InPossibleGlobstar => {
+                        pattern_state = PatternState::InGlobstar;
+                        pattern_idx += 1;
+                    }
+                    PatternState::InGlobstar | PatternState::InSuperWild => {
+                        // Skip redundant slashes
+                        pattern_idx += 1;
+                    }
+                    PatternState::InWildcard => {
+                        // Trigger wildcard matching
                         let next_pattern_idx = match_wildcard_segment(
                             pattern_bytes,
                             pattern_idx,
                             &mut active,
                             &mut results,
                             false, // wildcard mode
+                            question_count,
                         )?;
-
                         pattern_idx = next_pattern_idx;
+                        pattern_state = PatternState::Literal;
+                        question_count = 0;
                     }
-                } else {
-                    // Single wildcard *
-                    pattern_idx += 1;
+                    PatternState::Literal => {
+                        // Match / literally against active strings
+                        consume_byte(&mut active, &mut results, |b| b == Some(b'/'));
+                        pattern_idx += 1;
+                    }
+                }
+            }
+            b'?' => {
+                match pattern_state {
+                    PatternState::Literal => {
+                        // Match ? as single char
+                        pattern_idx += 1;
+                        consume_byte(&mut active, &mut results, |b| matches!(b, Some(c) if c != b'/'));
+                    }
+                    PatternState::InWildcard
+                    | PatternState::InPossibleGlobstar
+                    | PatternState::InGlobstar
+                    | PatternState::InSuperWild => {
+                        // In any wildcard state: just count it
+                        question_count += 1;
+                        pattern_idx += 1;
+                    }
+                }
+            }
+            b'\\' => {
+                match pattern_state {
+                    PatternState::Literal => {
+                        // Escape next character
+                        if pattern_idx + 1 >= pattern_bytes.len() {
+                            return Err("Pattern ends with backslash".to_string());
+                        }
+                        pattern_idx += 1;
+                        let escaped: u8 = pattern_bytes[pattern_idx];
 
-                    // Match wildcard with next segment (up to next *)
-                    let next_pattern_idx = match_wildcard_segment(
-                        pattern_bytes,
-                        pattern_idx,
-                        &mut active,
-                        &mut results,
-                        false, // wildcard mode
-                    )?;
-
-                    pattern_idx = next_pattern_idx;
+                        // Match literal byte against all active strings
+                        consume_byte(&mut active, &mut results, |b| b == Some(escaped));
+                        pattern_idx += 1;
+                    }
+                    PatternState::InWildcard | PatternState::InPossibleGlobstar => {
+                        // Trigger wildcard matching
+                        let next_pattern_idx = match_wildcard_segment(
+                            pattern_bytes,
+                            pattern_idx,
+                            &mut active,
+                            &mut results,
+                            false, // wildcard mode
+                            question_count,
+                        )?;
+                        pattern_idx = next_pattern_idx;
+                        pattern_state = PatternState::Literal;
+                        question_count = 0;
+                    }
+                    PatternState::InGlobstar => {
+                        // Trigger globstar matching
+                        let next_pattern_idx = match_wildcard_segment(
+                            pattern_bytes,
+                            pattern_idx,
+                            &mut active,
+                            &mut results,
+                            true, // globstar mode
+                            question_count,
+                        )?;
+                        pattern_idx = next_pattern_idx;
+                        pattern_state = PatternState::Literal;
+                        question_count = 0;
+                    }
+                    PatternState::InSuperWild => {
+                        // Trigger super-wild matching (TODO: implement super-wild mode)
+                        let next_pattern_idx = match_wildcard_segment(
+                            pattern_bytes,
+                            pattern_idx,
+                            &mut active,
+                            &mut results,
+                            true, // use globstar mode for now
+                            question_count,
+                        )?;
+                        pattern_idx = next_pattern_idx;
+                        pattern_state = PatternState::Literal;
+                        question_count = 0;
+                    }
                 }
             }
             b'[' => {
-                // Character class
-                let (charset, class_end) = extract_charset(pattern_bytes, pattern_idx)?;
-                pattern_idx = class_end;
+                match pattern_state {
+                    PatternState::Literal => {
+                        // Character class
+                        let (charset, class_end) = extract_charset(pattern_bytes, pattern_idx)?;
+                        pattern_idx = class_end;
 
-                // Match charset against all active strings
-                let mut i: usize = 0;
-                while i < active.len() {
-                    let string: &mut ActiveString<'_> = &mut active[i];
-
-                    match string.current_byte() {
-                        Some(b) if charset.matches(b) => {
-                            // Still matching - advance position
-                            string.advance();
-                            i += 1;
-                        }
-                        _ => {
-                            // Failed - mark result and remove from active
-                            results[string.original_idx] = false;
-                            active.swap_remove(i);
-                            // Don't increment i - check what was swapped in
-                        }
+                        // Match charset against all active strings
+                        consume_byte(&mut active, &mut results, |b| matches!(b, Some(c) if charset.matches(c)));
+                    }
+                    PatternState::InWildcard | PatternState::InPossibleGlobstar => {
+                        // Trigger wildcard matching
+                        let next_pattern_idx = match_wildcard_segment(
+                            pattern_bytes,
+                            pattern_idx,
+                            &mut active,
+                            &mut results,
+                            false, // wildcard mode
+                            question_count,
+                        )?;
+                        pattern_idx = next_pattern_idx;
+                        pattern_state = PatternState::Literal;
+                        question_count = 0;
+                    }
+                    PatternState::InGlobstar => {
+                        // Trigger globstar matching
+                        let next_pattern_idx = match_wildcard_segment(
+                            pattern_bytes,
+                            pattern_idx,
+                            &mut active,
+                            &mut results,
+                            true, // globstar mode
+                            question_count,
+                        )?;
+                        pattern_idx = next_pattern_idx;
+                        pattern_state = PatternState::Literal;
+                        question_count = 0;
+                    }
+                    PatternState::InSuperWild => {
+                        // Trigger super-wild matching
+                        let next_pattern_idx = match_wildcard_segment(
+                            pattern_bytes,
+                            pattern_idx,
+                            &mut active,
+                            &mut results,
+                            true, // use globstar mode for now
+                            question_count,
+                        )?;
+                        pattern_idx = next_pattern_idx;
+                        pattern_state = PatternState::Literal;
+                        question_count = 0;
                     }
                 }
             }
             _ => {
-                // Regular literal character
-                let mut i: usize = 0;
-                while i < active.len() {
-                    let string: &mut ActiveString<'_> = &mut active[i];
-
-                    match string.current_byte() {
-                        Some(b) if b == c => {
-                            // Still matching - advance position
-                            string.advance();
-                            i += 1;
-                        }
-                        _ => {
-                            // Failed - mark result and remove from active
-                            results[string.original_idx] = false;
-                            active.swap_remove(i);
-                            // Don't increment i - check what was swapped in
-                        }
+                match pattern_state {
+                    PatternState::Literal => {
+                        // Regular literal character
+                        consume_byte(&mut active, &mut results, |b| b == Some(c));
+                        pattern_idx += 1;
+                    }
+                    PatternState::InWildcard | PatternState::InPossibleGlobstar => {
+                        // Trigger wildcard matching
+                        let next_pattern_idx = match_wildcard_segment(
+                            pattern_bytes,
+                            pattern_idx,
+                            &mut active,
+                            &mut results,
+                            false, // wildcard mode
+                            question_count,
+                        )?;
+                        pattern_idx = next_pattern_idx;
+                        pattern_state = PatternState::Literal;
+                        question_count = 0;
+                    }
+                    PatternState::InGlobstar => {
+                        // Trigger globstar matching
+                        let next_pattern_idx = match_wildcard_segment(
+                            pattern_bytes,
+                            pattern_idx,
+                            &mut active,
+                            &mut results,
+                            true, // globstar mode
+                            question_count,
+                        )?;
+                        pattern_idx = next_pattern_idx;
+                        pattern_state = PatternState::Literal;
+                        question_count = 0;
+                    }
+                    PatternState::InSuperWild => {
+                        // Trigger super-wild matching
+                        let next_pattern_idx = match_wildcard_segment(
+                            pattern_bytes,
+                            pattern_idx,
+                            &mut active,
+                            &mut results,
+                            true, // use globstar mode for now
+                            question_count,
+                        )?;
+                        pattern_idx = next_pattern_idx;
+                        pattern_state = PatternState::Literal;
+                        question_count = 0;
                     }
                 }
-
-                pattern_idx += 1;
             }
         }
     }
 
-    // Pattern exhausted - mark remaining active strings based on completion state
-    for string in active {
-        // String must be exhausted OR next character is b'/' (directory match)
-        results[string.original_idx] = match string.current_byte() {
-            Some(b'/') | None => true,
-            Some(_) => false,
-        };
+    // Pattern exhausted - handle any remaining wildcard state
+    match pattern_state {
+        PatternState::Literal => {
+            // Normal completion - mark remaining active strings based on completion state
+            for string in active {
+                // String must be exhausted OR next character is b'/' (directory match)
+                results[string.original_idx] = match string.current_byte() {
+                    Some(b'/') | None => true,
+                    Some(_) => false,
+                };
+            }
+        }
+        PatternState::InWildcard | PatternState::InPossibleGlobstar => {
+            // Pattern ends with wildcard - match remaining string (no /)
+            for string in active.iter_mut() {
+                loop {
+                    match string.current_byte() {
+                        Some(b'/') | None => break,
+                        _ => string.advance(),
+                    }
+                }
+                results[string.original_idx] = true;
+            }
+        }
+        PatternState::InGlobstar | PatternState::InSuperWild => {
+            // Pattern ends with globstar or super-wild - match everything
+            for string in active.iter_mut() {
+                string.position = string.bytes.len();
+                results[string.original_idx] = true;
+            }
+        }
     }
 
     Ok(results)
@@ -246,6 +395,9 @@ pub fn match_batch(pattern: &str, strings: &[&str]) -> Result<Vec<bool>, String>
 /// - In wildcard mode: can consume any chars except /, enters terminating mode after /
 /// - In globstar mode: can consume any chars including /
 ///
+/// `required_chars` specifies the minimum number of non-slash characters that must be
+/// consumed by the wildcard before the pattern segment starts matching.
+///
 /// Failed strings are swap-removed from active and marked false in results.
 /// Returns the pattern index after consuming the segment.
 fn match_wildcard_segment(
@@ -254,6 +406,7 @@ fn match_wildcard_segment(
     active: &mut Vec<ActiveString>,
     results: &mut [bool],
     globstar: bool,
+    required_chars: usize,
 ) -> Result<usize, String> {
     // Patterns ending in globstar or wild
     if pattern_start >= pattern.len() {
@@ -289,6 +442,38 @@ fn match_wildcard_segment(
             // In wildcard terminating mode, can't try new positions
             if !globstar && terminating {
                 break;
+            }
+
+            // If question marks were specified after the wildcard, enforce exact count
+            if required_chars > 0 {
+                // Count non-slash chars immediately preceding try_pos
+                let chars_before_try = if globstar {
+                    // In globstar mode, count backwards from try_pos until we hit a / or start_pos
+                    let mut count = 0;
+                    let mut pos = try_pos;
+                    while pos > start_pos && string.bytes.get(pos - 1).copied() != Some(b'/') {
+                        count += 1;
+                        pos -= 1;
+                    }
+                    count
+                } else {
+                    // In wildcard mode, all chars from start_pos to try_pos are non-slash
+                    try_pos - start_pos
+                };
+
+                if chars_before_try < required_chars {
+                    // Haven't consumed enough characters yet, keep trying
+                    continue;
+                } else if chars_before_try > required_chars {
+                    // Consumed too many characters without a directory boundary
+                    // In non-globstar mode, we can't skip ahead so stop
+                    // In globstar mode, continue (might find a / that creates the right boundary)
+                    if !globstar {
+                        break;
+                    }
+                    continue;
+                }
+                // Exactly the right number of chars consumed, proceed with matching
             }
 
             // In wildcard mode, check if this position starts with /
@@ -333,6 +518,15 @@ fn match_wildcard_segment(
 
                         match string.bytes.get(string_idx).copied() {
                             Some(b) if charset.matches(b) => string_idx += 1,
+                            _ => segment_matched = false,
+                        }
+                    }
+                    b'?' => {
+                        // Single character wildcard (matches any character except /)
+                        pattern_idx += 1;
+
+                        match string.bytes.get(string_idx).copied() {
+                            Some(b) if b != b'/' => string_idx += 1,
                             _ => segment_matched = false,
                         }
                     }
@@ -1069,6 +1263,75 @@ mod tests {
         )
         .expect_err("expected empty character class to error");
         assert!(err.contains("Empty"));
+    }
+
+    // ========== Question mark wildcard (single character) ==========
+
+    #[test]
+    fn test_question_mark_basic() {
+        let result = match_batch("file?.txt", &["file1.txt", "fileA.txt", "file.txt", "file12.txt"]).unwrap();
+        assert_eq!(result, vec![true, true, false, false]);
+    }
+
+    #[test]
+    fn test_question_mark_multiple() {
+        let result = match_batch("test??.rs", &["test12.rs", "testab.rs", "test1.rs", "test.rs"]).unwrap();
+        assert_eq!(result, vec![true, true, false, false]);
+    }
+
+    #[test]
+    fn test_question_mark_with_wildcard() {
+        let result = match_batch("*.?s", &["file.rs", "test.ts", "doc.js", "app.css"]).unwrap();
+        assert_eq!(result, vec![true, true, true, false]);
+    }
+
+    #[test]
+    fn test_question_mark_no_slash() {
+        // ? should not match /
+        let result = match_batch("dir?file.txt", &["dirXfile.txt", "dir/file.txt", "dirfile.txt"]).unwrap();
+        assert_eq!(result, vec![true, false, false]);
+    }
+
+    #[test]
+    fn test_question_mark_at_end() {
+        let result = match_batch("test.rs?", &["test.rs1", "test.rsx", "test.rs", "test.rs/x"]).unwrap();
+        assert_eq!(result, vec![true, true, false, false]);
+    }
+
+    #[test]
+    fn test_question_mark_at_start() {
+        let result = match_batch("?est.txt", &["test.txt", "rest.txt", "est.txt", "/est.txt"]).unwrap();
+        assert_eq!(result, vec![true, true, false, false]);
+    }
+
+    #[test]
+    fn test_question_mark_with_globstar() {
+        let result = match_batch("src/**/??.rs", &["src/ab.rs", "src/mod/xy.rs", "src/a.rs", "src/abc.rs"]).unwrap();
+        assert_eq!(result, vec![true, true, false, false]);
+    }
+
+    #[test]
+    fn test_question_mark_with_charset() {
+        let result = match_batch("file[0-9]?.txt", &["file00.txt", "file0a.txt", "file0.txt", "file01.txt"]).unwrap();
+        assert_eq!(result, vec![true, true, false, true]);
+    }
+
+    #[test]
+    fn test_question_mark_directory_boundary() {
+        let result = match_batch("src?main.rs", &["srcXmain.rs", "src/main.rs", "srcmain.rs"]).unwrap();
+        assert_eq!(result, vec![true, false, false]);
+    }
+
+    #[test]
+    fn test_escaped_question_mark() {
+        let result = match_batch("file\\?.txt", &["file?.txt", "fileX.txt", "file.txt"]).unwrap();
+        assert_eq!(result, vec![true, false, false]);
+    }
+
+    #[test]
+    fn test_question_mark_all_positions() {
+        let result = match_batch("?a?b?", &["1a2b3", "xaybz", "ab", "1a2b"]).unwrap();
+        assert_eq!(result, vec![true, true, false, false]);
     }
 
     // ========== Escaping within charsets and literals ==========
