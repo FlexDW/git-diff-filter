@@ -79,26 +79,26 @@ gdf -p <glob> [-p <glob>...] [-b <base-ref>] [-g <name>]
 ### Basic Usage (Plain Output)
 
 ```bash
-gdf -p 'components/reporting/**' -b refs/tags/production
-# stderr: Comparing: refs/tags/test..HEAD | Patterns: components/reporting/** | Match: true
+gdf -p 'services/admin/**' -b refs/tags/production
+# stderr: Comparing: refs/tags/test..HEAD | Patterns: services/admin/** | Match: true
 # stdout: true
 ```
 
 ### GitHub Actions Integration
 
 ```bash
-gdf -g reporting-api -p 'components/reporting/**' -b refs/tags/production
-# stderr: Comparing: refs/tags/production..HEAD | Patterns: components/reporting/** | Match: true
+gdf -g admin-api -p 'services/admin/**' -b refs/tags/production
+# stderr: Comparing: refs/tags/production..HEAD | Patterns: services/admin/** | Match: true
 # stdout: true
-# Writes to $GITHUB_OUTPUT: reporting-api=true
+# Writes to $GITHUB_OUTPUT: admin-api=true
 ```
 
 ### Using Environment Variable for Base Ref
 
 ```bash
 export BASE_REF=refs/tags/test
-gdf -p 'components/reporting/**'
-# stderr: Comparing: refs/tags/test..HEAD | Patterns: components/reporting/** | Match: false
+gdf -p 'services/admin/**'
+# stderr: Comparing: refs/tags/test..HEAD | Patterns: services/admin/** | Match: false
 # stdout: false
 ```
 
@@ -214,14 +214,14 @@ fi
 export BASE_REF=main
 
 # Check multiple components
-reporting_api=$(gdf -p 'components/reporting/**' -p 'libs/**')
-graph_api=$(gdf -p 'components/graph/**' -p 'libs/**')
-scheduler=$(gdf -p 'components/scheduler/**')
+web_api=$(gdf -p 'services/web/**' -p 'libs/**')
+mobile_api=$(gdf -p 'services/mobile/**' -p 'libs/**')
+worker=$(gdf -p 'services/worker/**')
 
 # Build only changed components
-[ "$reporting_api" = "true" ] && npm run build:reporting-api
-[ "$graph_api" = "true" ] && npm run build:graph-api
-[ "$scheduler" = "true" ] && npm run build:scheduler
+[ "$web_api" = "true" ] && npm run build:web-api
+[ "$mobile_api" = "true" ] && npm run build:mobile-api
+[ "$worker" = "true" ] && npm run build:worker
 
 echo "Build complete"
 ```
@@ -230,9 +230,9 @@ echo "Build complete"
 
 ```bash
 export BASE_REF=refs/tags/production
-gdf -g api -p 'api/**' -b main
+gdf -g web-api -p 'services/web/**' -b main
 # stderr: Comparing: main..HEAD (uses main, not refs/tags/production)
-# stdout: api=true
+# stdout: web-api=true
 ```
 
 ### GitHub Actions Integration
@@ -245,28 +245,28 @@ jobs:
     name: 'Detect changes'
     runs-on: ubuntu-latest
     outputs:
-      analysis-api: ${{ steps.changes.outputs.analysis-api }}
-      graph-api: ${{ steps.changes.outputs.graph-api }}
-      ingest-api: ${{ steps.changes.outputs.ingest-api }}
-      reporting-api: ${{ steps.changes.outputs.reporting-api }}
-      scheduler: ${{ steps.changes.outputs.scheduler }}
+      web-api: ${{ steps.changes.outputs.web-api }}
+      mobile-api: ${{ steps.changes.outputs.mobile-api }}
+      worker-service: ${{ steps.changes.outputs.worker-service }}
+      admin-api: ${{ steps.changes.outputs.admin-api }}
+      frontend: ${{ steps.changes.outputs.frontend }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0  # Required for git history
 
       - name: Install gdf
-        uses: your-org/git-diff-filter@v1
+        uses: FlexDW/git-diff-filter@v1
 
       - name: Detect component changes
         id: changes
         run: |
           export BASE_REF=main
-          gdf -g analysis-api -p 'components/exceptions/analysis-api/**' -p 'libs/**'
-          gdf -g graph-api -p 'components/graph/graph-api/**' -p 'libs/**'
-          gdf -g ingest-api -p 'components/ingest/ingest-api/**' -p 'libs/**'
-          gdf -g reporting-api -p 'components/reporting/reporting-api/**' -p 'libs/**'
-          gdf -g scheduler -p 'components/scheduler/**' -p 'libs/**'
+          gdf -g web-api -p 'services/web/**' -p 'libs/**'
+          gdf -g mobile-api -p 'services/mobile/**' -p 'libs/**'
+          gdf -g worker-service -p 'services/worker/**' -p 'libs/**'
+          gdf -g admin-api -p 'services/admin/**' -p 'libs/**'
+          gdf -g frontend -p 'apps/frontend/**' -p 'libs/**'
 
   build:
     name: 'Build changed components'
@@ -274,7 +274,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        component: [analysis-api, graph-api, ingest-api, reporting-api, scheduler]
+        component: [web-api, mobile-api, worker-service, admin-api, frontend]
     steps:
       - uses: actions/checkout@v4
 
@@ -437,7 +437,7 @@ This project includes a dev container configuration. Open the project in VS Code
 Use the action for automatic setup:
 
 ```yaml
-- uses: your-org/git-diff-filter@v1
+- uses: FlexDW/git-diff-filter@v1
 ```
 
 This action:
@@ -452,7 +452,7 @@ If you prefer manual installation:
 ```yaml
 - name: Install gdf
   run: |
-    curl -L https://github.com/your-org/git-diff-filter/releases/latest/download/gdf-linux-x86_64 -o gdf
+    curl -L https://github.com/FlexDW/git-diff-filter/releases/latest/download/gdf-linux-x86_64 -o gdf
     sudo mv gdf /usr/local/bin/
     chmod +x /usr/local/bin/gdf
 ```

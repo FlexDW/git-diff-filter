@@ -4,6 +4,12 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (e.g., v0.1.0)'
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -17,13 +23,18 @@ jobs:
 
       - name: Extract version from tag
         id: version
-        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            echo "VERSION=${{ inputs.tag }}" >> $GITHUB_OUTPUT
+          else
+            echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          fi
 
       - name: Build binary with Docker
         run: |
           docker build -t gdf-builder .
           docker create --name gdf-container gdf-builder
-          docker cp gdf-container:/build/target/release/git-diff-filter ./gdf-linux-x86_64
+          docker cp gdf-container:/build/target/release/gdf ./gdf-linux-x86_64
           docker rm gdf-container
 
       - name: Create Release
