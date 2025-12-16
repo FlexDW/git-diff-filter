@@ -1,6 +1,6 @@
 name: 'Git Diff Filter'
-description: 'Analyzes git diff to determine which parts of the code changed'
-author: 'Your Organization'
+description: 'Installs a utility for conditional CI/CD workflow triggering'
+author: 'FlexDW'
 
 branding:
   icon: 'filter'
