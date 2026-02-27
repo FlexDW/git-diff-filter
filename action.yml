@@ -12,13 +12,11 @@ runs:
     - name: Download and install gdf
       shell: bash
       run: |
-        VERSION="${GITHUB_ACTION_REF#v}"
-        if [ -z "$VERSION" ] || [ "$VERSION" = "$GITHUB_ACTION_REF" ]; then
-          VERSION="latest"
+        if [ -z "$GITHUB_ACTION_REF" ] || [ "$GITHUB_ACTION_REF" = "latest" ]; then
+          BINARY_URL="https://github.com/${GITHUB_ACTION_REPOSITORY}/releases/latest/download/gdf-linux-x86_64"
+        else
+          BINARY_URL="https://github.com/${GITHUB_ACTION_REPOSITORY}/releases/download/${GITHUB_ACTION_REF}/gdf-linux-x86_64"
         fi
-        
-        REPO="$GITHUB_ACTION_REPOSITORY"
-        BINARY_URL="https://github.com/${REPO}/releases/download/v${VERSION}/gdf-linux-x86_64"
         
         echo "Downloading gdf from ${BINARY_URL}"
         curl -L "${BINARY_URL}" -o gdf
@@ -26,4 +24,4 @@ runs:
         sudo mv gdf /usr/local/bin/
         
         echo "gdf installed successfully"
-        gdf --version || echo "gdf v${VERSION}"
+        gdf --version || echo "gdf ${GITHUB_ACTION_REF}"

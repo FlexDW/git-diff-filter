@@ -18,7 +18,9 @@ fn execute_git_diff(base_ref: &str) -> Result<String, String> {
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         let stderr_trimmed = stderr.trim();
-        return Err(format!("Git command failed: {stderr_trimmed}"));
+        return Err(format!(
+            "Git command failed. If this runs in CI, ensure repository code is checked out before running gdf (for GitHub Actions: use actions/checkout@v4). Original error: {stderr_trimmed}"
+        ));
     }
 
     String::from_utf8(output.stdout)
