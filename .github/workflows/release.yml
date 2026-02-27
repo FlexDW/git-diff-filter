@@ -61,6 +61,15 @@ jobs:
           echo "tag=$VERSION" >> $GITHUB_OUTPUT
           echo "Using override version: $VERSION"
 
+      - name: Update Cargo.toml version
+        # overwrite config so binary aligns with release without updating the code 
+        run: |
+          VERSION_TAG="${{ steps.bumped.outputs.tag || steps.override.outputs.tag }}"
+          VERSION_NUMBER="${VERSION_TAG#v}"
+          echo "Updating Cargo.toml version to $VERSION_NUMBER"
+          sed -i 's/^version = ".*"/version = "'"$VERSION_NUMBER"'"/' Cargo.toml
+          grep '^version = ' Cargo.toml
+
       - name: Build binary with Docker
         run: |
           docker build -t gdf-builder .
