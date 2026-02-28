@@ -64,11 +64,11 @@ where
 /// Pattern matching state machine
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum PatternState {
-    Literal,              // Normal character-by-character matching
-    InWildcard,           // Seen *, determining what kind
-    InPossibleGlobstar,   // Seen **, determining if **/
-    InGlobstar,           // Confirmed **/, ready to match
-    InSuperWild,          // Confirmed **/*,  ready to match
+    Literal,            // Normal character-by-character matching
+    InWildcard,         // Seen *, determining what kind
+    InPossibleGlobstar, // Seen **, determining if **/
+    InGlobstar,         // Confirmed **/, ready to match
+    InSuperWild,        // Confirmed **/*,  ready to match
 }
 
 /// Match multiple strings against a single glob pattern
@@ -174,7 +174,11 @@ pub fn match_batch(pattern: &str, strings: &[&str]) -> Result<Vec<bool>, String>
                     PatternState::Literal => {
                         // Match ? as single char
                         pattern_idx += 1;
-                        consume_byte(&mut active, &mut results, |b| matches!(b, Some(c) if c != b'/'));
+                        consume_byte(
+                            &mut active,
+                            &mut results,
+                            |b| matches!(b, Some(c) if c != b'/'),
+                        );
                     }
                     PatternState::InWildcard
                     | PatternState::InPossibleGlobstar
@@ -252,7 +256,11 @@ pub fn match_batch(pattern: &str, strings: &[&str]) -> Result<Vec<bool>, String>
                         pattern_idx = class_end;
 
                         // Match charset against all active strings
-                        consume_byte(&mut active, &mut results, |b| matches!(b, Some(c) if charset.matches(c)));
+                        consume_byte(
+                            &mut active,
+                            &mut results,
+                            |b| matches!(b, Some(c) if charset.matches(c)),
+                        );
                     }
                     PatternState::InWildcard | PatternState::InPossibleGlobstar => {
                         // Trigger wildcard matching
@@ -366,7 +374,7 @@ pub fn match_batch(pattern: &str, strings: &[&str]) -> Result<Vec<bool>, String>
         }
         PatternState::InWildcard | PatternState::InPossibleGlobstar => {
             // Pattern ends with wildcard - match remaining string (no /)
-            for string in active.iter_mut() {
+            for string in &mut active {
                 loop {
                     match string.current_byte() {
                         Some(b'/') | None => break,
@@ -378,7 +386,7 @@ pub fn match_batch(pattern: &str, strings: &[&str]) -> Result<Vec<bool>, String>
         }
         PatternState::InGlobstar | PatternState::InSuperWild => {
             // Pattern ends with globstar or super-wild - match everything
-            for string in active.iter_mut() {
+            for string in &mut active {
                 string.position = string.bytes.len();
                 results[string.original_idx] = true;
             }
@@ -400,6 +408,7 @@ pub fn match_batch(pattern: &str, strings: &[&str]) -> Result<Vec<bool>, String>
 ///
 /// Failed strings are swap-removed from active and marked false in results.
 /// Returns the pattern index after consuming the segment.
+#[allow(clippy::too_many_lines)]
 fn match_wildcard_segment(
     pattern: &[u8],
     pattern_start: usize,
@@ -1269,13 +1278,21 @@ mod tests {
 
     #[test]
     fn test_question_mark_basic() {
-        let result = match_batch("file?.txt", &["file1.txt", "fileA.txt", "file.txt", "file12.txt"]).unwrap();
+        let result = match_batch(
+            "file?.txt",
+            &["file1.txt", "fileA.txt", "file.txt", "file12.txt"],
+        )
+        .unwrap();
         assert_eq!(result, vec![true, true, false, false]);
     }
 
     #[test]
     fn test_question_mark_multiple() {
-        let result = match_batch("test??.rs", &["test12.rs", "testab.rs", "test1.rs", "test.rs"]).unwrap();
+        let result = match_batch(
+            "test??.rs",
+            &["test12.rs", "testab.rs", "test1.rs", "test.rs"],
+        )
+        .unwrap();
         assert_eq!(result, vec![true, true, false, false]);
     }
 
@@ -1288,37 +1305,55 @@ mod tests {
     #[test]
     fn test_question_mark_no_slash() {
         // ? should not match /
-        let result = match_batch("dir?file.txt", &["dirXfile.txt", "dir/file.txt", "dirfile.txt"]).unwrap();
+        let result = match_batch(
+            "dir?file.txt",
+            &["dirXfile.txt", "dir/file.txt", "dirfile.txt"],
+        )
+        .unwrap();
         assert_eq!(result, vec![true, false, false]);
     }
 
     #[test]
     fn test_question_mark_at_end() {
-        let result = match_batch("test.rs?", &["test.rs1", "test.rsx", "test.rs", "test.rs/x"]).unwrap();
+        let result = match_batch(
+            "test.rs?",
+            &["test.rs1", "test.rsx", "test.rs", "test.rs/x"],
+        )
+        .unwrap();
         assert_eq!(result, vec![true, true, false, false]);
     }
 
     #[test]
     fn test_question_mark_at_start() {
-        let result = match_batch("?est.txt", &["test.txt", "rest.txt", "est.txt", "/est.txt"]).unwrap();
+        let result =
+            match_batch("?est.txt", &["test.txt", "rest.txt", "est.txt", "/est.txt"]).unwrap();
         assert_eq!(result, vec![true, true, false, false]);
     }
 
     #[test]
     fn test_question_mark_with_globstar() {
-        let result = match_batch("src/**/??.rs", &["src/ab.rs", "src/mod/xy.rs", "src/a.rs", "src/abc.rs"]).unwrap();
+        let result = match_batch(
+            "src/**/??.rs",
+            &["src/ab.rs", "src/mod/xy.rs", "src/a.rs", "src/abc.rs"],
+        )
+        .unwrap();
         assert_eq!(result, vec![true, true, false, false]);
     }
 
     #[test]
     fn test_question_mark_with_charset() {
-        let result = match_batch("file[0-9]?.txt", &["file00.txt", "file0a.txt", "file0.txt", "file01.txt"]).unwrap();
+        let result = match_batch(
+            "file[0-9]?.txt",
+            &["file00.txt", "file0a.txt", "file0.txt", "file01.txt"],
+        )
+        .unwrap();
         assert_eq!(result, vec![true, true, false, true]);
     }
 
     #[test]
     fn test_question_mark_directory_boundary() {
-        let result = match_batch("src?main.rs", &["srcXmain.rs", "src/main.rs", "srcmain.rs"]).unwrap();
+        let result =
+            match_batch("src?main.rs", &["srcXmain.rs", "src/main.rs", "srcmain.rs"]).unwrap();
         assert_eq!(result, vec![true, false, false]);
     }
 

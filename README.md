@@ -27,16 +27,34 @@ A command-line utility for detecting changes in a monorepo by comparing git diff
 
 ## Usage
 
+**Pattern mode** — match changed files against glob patterns:
 ```bash
 gdf -p <glob> [-p <glob>...] [-b <base-ref>] [-g <name>]
 ```
 
+**Container mode** — detect changes inside a container directory, respecting `.dockerignore`:
+```bash
+gdf -c <dir> [-c <dir>...] [-b <base-ref>] [-g <name>]
+```
+
+**Combined** — true if patterns match *or* any container has changes:
+```bash
+gdf -p <glob> [-p <glob>...] -c <dir> [-c <dir>...] [-b <base-ref>] [-g <name>]
+```
+
+At least one `-p` or `-c` must be provided. Flags can be mixed freely.
+
 ### Arguments and Flags
 
-#### Required Flags
+#### Required (one of)
 
 - `-p, --pattern <glob>` - Glob pattern to match against changed files (can be specified multiple times)
   - **Note**: Wrap patterns in quotes to prevent shell expansion (e.g., `'libs/**'` not `libs/**`)
+- `-c, --container <dir>` - Path to a container directory (e.g., `services/api`); can be specified multiple times
+  - Returns `true` if any file inside `<dir>` changed, after applying `.dockerignore` rules if present
+  - Without a `.dockerignore`, any change inside the directory is relevant
+  - With a `.dockerignore`, rules are applied in-order: plain patterns remove files from the relevant set; `!pattern` lines restore them
+  - Can be combined with `-p`; the overall result is true if patterns match **or** any container has changes
 
 #### Optional Flags
 
@@ -57,15 +75,28 @@ gdf -p <glob> [-p <glob>...] [-b <base-ref>] [-g <name>]
 
 1. Reads the base reference from `--base-ref` flag or falls back to `BASE_REF` environment variable
 2. Executes `git diff --name-only $BASE_REF..HEAD` to get list of changed files
-3. Pattern matching logic:
+3. Matching logic:
+
+   **Pattern mode** (`-p`):
    - Separate patterns into inclusion patterns (no `!` prefix) and exclusion patterns (`!` prefix)
-   - Match all changed files against inclusion patterns first
-   - Build a set of matched file paths (deduplicated)
-   - Remove file paths that match any exclusion pattern
-   - Return `true` if any files remain after exclusions, `false` otherwise
-   - If no inclusion patterns provided, always returns `false`
+   - Match all changed files against all inclusion patterns — build a deduplicated set
+   - Remove from that set any file matching an exclusion pattern
+   - Exclusions are order-independent and applied globally
+   - Returns `true` if any files remain after exclusions
+
+   **Container mode** (`-c`, repeated per directory):
+   - For each specified `<dir>`, collect all changed files inside it (matched against `<dir>/**`)
+   - If no `.dockerignore` exists in `<dir>`, that directory contributes `true` immediately if any such files exist
+   - If a `.dockerignore` exists, apply its rules **in order** to the collected set:
+     - Plain pattern (e.g., `*.log`) — remove matching files from the relevant set
+     - Exception pattern (e.g., `!important.log`) — restore matching files to the relevant set
+     - Comments (`#`) and blank lines are ignored
+   - That directory contributes `true` if any files remain in the relevant set
+   - Note: `.dockerignore` `*` only matches within one directory level; use `**` for recursive matching
+
+   **Combined:** the overall result is `true` if the pattern check passes **or** any container check passes (short-circuit OR, patterns evaluated first).
+
 4. Output:
-   - **stderr**: Logs comparison info for debugging (e.g., `Comparing: main..HEAD | Patterns: src/** | Match: true`)
    - **stdout** (without `-g` flag): Outputs `true` or `false`
    - **stdout** (with `-g` flag): Outputs `<name>=true` or `<name>=false` AND writes to `$GITHUB_OUTPUT` file (if the environment variable exists)
 
@@ -80,7 +111,6 @@ gdf -p <glob> [-p <glob>...] [-b <base-ref>] [-g <name>]
 
 ```bash
 gdf -p 'services/admin/**' -b refs/tags/production
-# stderr: Comparing: refs/tags/test..HEAD | Patterns: services/admin/** | Match: true
 # stdout: true
 ```
 
@@ -88,8 +118,7 @@ gdf -p 'services/admin/**' -b refs/tags/production
 
 ```bash
 gdf -g admin-api -p 'services/admin/**' -b refs/tags/production
-# stderr: Comparing: refs/tags/production..HEAD | Patterns: services/admin/** | Match: true
-# stdout: true
+# stdout: admin-api=true
 # Writes to $GITHUB_OUTPUT: admin-api=true
 ```
 
@@ -98,7 +127,6 @@ gdf -g admin-api -p 'services/admin/**' -b refs/tags/production
 ```bash
 export BASE_REF=refs/tags/test
 gdf -p 'services/admin/**'
-# stderr: Comparing: refs/tags/test..HEAD | Patterns: services/admin/** | Match: false
 # stdout: false
 ```
 
@@ -107,8 +135,56 @@ gdf -p 'services/admin/**'
 ```bash
 # Match if any of these patterns match
 gdf -p 'libs/**' -p 'package.json' -p 'lerna.json' -b main
-# stderr: Comparing: main..HEAD | Patterns: libs/**, package.json, lerna.json | Match: true
 # stdout: true
+```
+
+### Container Mode (without `.dockerignore`)
+
+```bash
+# Any change inside services/api/ triggers true
+gdf -c 'services/api' -b main
+# stdout: true
+```
+
+### Container Mode (with `.dockerignore`)
+
+Given `services/api/.dockerignore`:
+```
+# Ignore generated and vendor directories
+vendor/
+*.generated.go
+
+# But always track proto files
+!**/*.proto
+```
+
+```bash
+gdf -c 'services/api' -b main
+# Returns true only if non-ignored files changed inside services/api/
+```
+
+### Multiple Containers
+
+```bash
+# True if either service has relevant changes
+gdf -c 'services/api' -c 'services/web' -b main
+# stdout: true
+```
+
+### Combined Pattern + Container Mode
+
+```bash
+# True if shared libs changed OR either service has relevant changes
+gdf -p 'libs/**' -c 'services/api' -c 'services/web' -b main
+# stdout: true
+```
+
+### Container Mode in GitHub Actions
+
+```bash
+gdf -g api-service -c 'services/api' -b main
+# stdout: api-service=true
+# Writes to $GITHUB_OUTPUT: api-service=true
 ```
 
 ### Root-Anchored Patterns
@@ -138,7 +214,6 @@ gdf -p '**/dist/' -b main
 ```bash
 # Match all source files except markdown
 gdf -p 'src/**' -p '!*.md' -b main
-# stderr: Comparing: main..HEAD | Patterns: src/**, !*.md | Match: true
 # stdout: true
 
 # Match files in src/ but exclude test directories and markdown
@@ -203,7 +278,6 @@ result=$(gdf -p 'src/**' -b main)
 if [ "$result" = "true" ]; then
   echo "Source code changed"
 fi
-# stderr: Comparing: main..HEAD | Patterns: src/** | Match: true
 # stdout: true
 ```
 
@@ -231,7 +305,7 @@ echo "Build complete"
 ```bash
 export BASE_REF=refs/tags/production
 gdf -g web-api -p 'services/web/**' -b main
-# stderr: Comparing: main..HEAD (uses main, not refs/tags/production)
+# Uses main, not refs/tags/production (CLI flag takes precedence)
 # stdout: web-api=true
 ```
 
@@ -267,6 +341,8 @@ jobs:
           gdf -g worker-service -p 'services/worker/**' -p 'libs/**'
           gdf -g admin-api -p 'services/admin/**' -p 'libs/**'
           gdf -g frontend -p 'apps/frontend/**' -p 'libs/**'
+          # Combined: shared libs OR container-specific changes (respecting .dockerignore)
+          gdf -g api-docker -p 'libs/**' -c 'services/api'
 
   build:
     name: 'Build changed components'
@@ -336,7 +412,7 @@ This format is automatically written to `$GITHUB_OUTPUT` (if the environment var
 
 ### Glob Matching
 
-- Gitignore-style glob pattern matching
+- Custom glob pattern matching using only Rust's standard library
 - Patterns are matched against relative file paths from repository root
 - **Supported patterns**:
   - `**` - Match any number of directories (e.g., `src/**/*.rs`)
@@ -355,7 +431,9 @@ This format is automatically written to `$GITHUB_OUTPUT` (if the environment var
   - Leading `/` is stripped (anchors to root)
   - Trailing `/` is stripped (matches directory prefix)
   - Patterns can match directory prefixes: `src/bin` matches `src/bin/main.rs`
-  - Exclusions are order-independent and apply to all inclusion results
+  - Exclusions are order-independent and apply to all inclusion results (pattern mode only)
+  - In container mode, `.dockerignore` rules are order-dependent: later rules override earlier ones
+  - `.dockerignore` `*` only matches within a single directory level; `**` is required for recursive matching
 - **Not supported**:
   - `{a,b}` - Brace expansion (OUT OF SCOPE - use multiple `-p` flags instead)
 - Matching is case-sensitive
@@ -366,10 +444,11 @@ This format is automatically written to `$GITHUB_OUTPUT` (if the environment var
 
 The tool provides clear error messages:
 
-- Missing base ref: `Error: BASE_REF must be provided via --base-ref flag or BASE_REF environment variable`
+- Missing base ref: `Error: BASE_REF must be provided via -b/--base-ref flag or BASE_REF environment variable`
 - Git command failure: `Error: Failed to execute git diff: <error message>`
-- Missing required flags: `Error: at least one --pattern is required`
-- Invalid arguments: `Error: Unknown argument: <argument>` or `Error: <flag> requires a value`
+- Missing required flags: `Error: at least one --pattern or --container is required`
+- Failed to read `.dockerignore`: `Error: Failed to read <path>/.dockerignore: <error message>`
+- Invalid arguments: `Error: Unknown flag: <flag>` or `Error: <flag> requires a value`
 
 ### Prerequisites
 
@@ -500,7 +579,7 @@ The CI will build and upload the binary to GitHub Releases.
   - Byte-level processing for control characters (no UTF-8 overhead)
 - No runtime dependencies or startup costs
 - Expected execution time: <100ms for typical monorepos
-- 138 comprehensive tests ensure correctness
+- 167 comprehensive tests ensure correctness
 
 ## Dependencies
 

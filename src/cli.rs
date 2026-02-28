@@ -8,6 +8,7 @@ pub struct Args {
     pub patterns: Vec<String>,
     pub base_ref: Option<String>,
     pub github_output: Option<String>,
+    pub container_dirs: Vec<String>,
 }
 
 /// Parse command-line arguments from environment
@@ -21,6 +22,7 @@ fn parse_args_from_vec(args: &[String]) -> Result<Args, String> {
     let mut patterns = Vec::new();
     let mut base_ref = None;
     let mut github_output = None;
+    let mut container_dirs = Vec::new();
 
     let mut i = 0;
     while i < args.len() {
@@ -54,6 +56,13 @@ fn parse_args_from_vec(args: &[String]) -> Result<Args, String> {
                 }
                 github_output = Some(args[i].clone());
             }
+            "-c" | "--container" => {
+                i += 1;
+                if i >= args.len() {
+                    return Err(format!("{arg} requires a value"));
+                }
+                container_dirs.push(args[i].clone());
+            }
             _ => {
                 if arg.starts_with('-') {
                     return Err(format!("Unknown flag: {arg}"));
@@ -64,15 +73,16 @@ fn parse_args_from_vec(args: &[String]) -> Result<Args, String> {
         i += 1;
     }
 
-    // Validate required flags
-    if patterns.is_empty() {
-        return Err("at least one --pattern is required".to_string());
+    // Validate required flags - need at least one pattern or container
+    if patterns.is_empty() && container_dirs.is_empty() {
+        return Err("at least one --pattern or --container is required".to_string());
     }
 
     Ok(Args {
         patterns,
         base_ref,
         github_output,
+        container_dirs,
     })
 }
 
@@ -94,6 +104,7 @@ mod tests {
                 patterns: vec!["*.txt".to_string()],
                 base_ref: None,
                 github_output: None,
+                container_dirs: vec![],
             })
         );
     }
@@ -107,6 +118,7 @@ mod tests {
                 patterns: vec!["*.txt".to_string(), "*.rs".to_string()],
                 base_ref: None,
                 github_output: None,
+                container_dirs: vec![],
             })
         );
     }
@@ -120,6 +132,7 @@ mod tests {
                 patterns: vec!["*.txt".to_string()],
                 base_ref: Some("main".to_string()),
                 github_output: None,
+                container_dirs: vec![],
             })
         );
     }
@@ -133,6 +146,7 @@ mod tests {
                 patterns: vec!["*.txt".to_string()],
                 base_ref: None,
                 github_output: Some("api".to_string()),
+                container_dirs: vec![],
             })
         );
     }
@@ -146,6 +160,7 @@ mod tests {
                 patterns: vec!["*.txt".to_string(), "*.rs".to_string()],
                 base_ref: Some("main".to_string()),
                 github_output: Some("api".to_string()),
+                container_dirs: vec![],
             })
         );
     }
@@ -166,6 +181,7 @@ mod tests {
                 patterns: vec!["*.txt".to_string()],
                 base_ref: Some("main".to_string()),
                 github_output: Some("api".to_string()),
+                container_dirs: vec![],
             })
         );
     }
@@ -179,6 +195,7 @@ mod tests {
                 patterns: vec!["*.txt".to_string()],
                 base_ref: Some("main".to_string()),
                 github_output: Some("api".to_string()),
+                container_dirs: vec![],
             })
         );
     }
@@ -188,7 +205,7 @@ mod tests {
         let result = parse(&["-b", "main"]);
         assert_eq!(
             result,
-            Err("at least one --pattern is required".to_string())
+            Err("at least one --pattern or --container is required".to_string())
         );
     }
 
@@ -245,7 +262,7 @@ mod tests {
         let result = parse(&[]);
         assert_eq!(
             result,
-            Err("at least one --pattern is required".to_string())
+            Err("at least one --pattern or --container is required".to_string())
         );
     }
 
@@ -258,6 +275,7 @@ mod tests {
                 patterns: vec!["src/**/*.rs".to_string()],
                 base_ref: Some("refs/tags/v1.0".to_string()),
                 github_output: None,
+                container_dirs: vec![],
             })
         );
     }
@@ -271,6 +289,83 @@ mod tests {
                 patterns: vec!["*.txt".to_string(), "*.rs".to_string()],
                 base_ref: Some("main".to_string()),
                 github_output: Some("api".to_string()),
+                container_dirs: vec![],
+            })
+        );
+    }
+
+    #[test]
+    fn test_parse_single_container() {
+        let result = parse(&["-c", "services/api"]);
+        assert_eq!(
+            result,
+            Ok(Args {
+                patterns: vec![],
+                base_ref: None,
+                github_output: None,
+                container_dirs: vec!["services/api".to_string()],
+            })
+        );
+    }
+
+    #[test]
+    fn test_parse_multiple_containers() {
+        let result = parse(&["-c", "api", "-c", "web"]);
+        assert_eq!(
+            result,
+            Ok(Args {
+                patterns: vec![],
+                base_ref: None,
+                github_output: None,
+                container_dirs: vec!["api".to_string(), "web".to_string()],
+            })
+        );
+    }
+
+    #[test]
+    fn test_parse_container_long_form() {
+        let result = parse(&["--container", "services/api"]);
+        assert_eq!(
+            result,
+            Ok(Args {
+                patterns: vec![],
+                base_ref: None,
+                github_output: None,
+                container_dirs: vec!["services/api".to_string()],
+            })
+        );
+    }
+
+    #[test]
+    fn test_parse_mixed_patterns_and_containers() {
+        let result = parse(&["-p", "libs/**", "-c", "services/api", "-c", "services/web"]);
+        assert_eq!(
+            result,
+            Ok(Args {
+                patterns: vec!["libs/**".to_string()],
+                base_ref: None,
+                github_output: None,
+                container_dirs: vec!["services/api".to_string(), "services/web".to_string()],
+            })
+        );
+    }
+
+    #[test]
+    fn test_error_container_without_value() {
+        let result = parse(&["-c"]);
+        assert_eq!(result, Err("-c requires a value".to_string()));
+    }
+
+    #[test]
+    fn test_container_with_other_flags() {
+        let result = parse(&["-c", "api", "-b", "main", "-g", "changed"]);
+        assert_eq!(
+            result,
+            Ok(Args {
+                patterns: vec![],
+                base_ref: Some("main".to_string()),
+                github_output: Some("changed".to_string()),
+                container_dirs: vec!["api".to_string()],
             })
         );
     }

@@ -10,6 +10,7 @@ pub struct Config {
     pub base_ref: String,
     pub github_output_name: Option<String>,
     pub github_output_filepath: Option<String>,
+    pub container_dirs: Vec<String>,
 }
 
 /// Merge CLI arguments with environment variables
@@ -32,6 +33,7 @@ pub fn from_args(args: Args) -> Result<Config, String> {
         base_ref,
         github_output_name: args.github_output,
         github_output_filepath,
+        container_dirs: args.container_dirs,
     })
 }
 
@@ -45,6 +47,7 @@ mod tests {
             patterns: vec!["*.txt".to_string()],
             base_ref: Some("main".to_string()),
             github_output: None,
+            container_dirs: vec![],
         };
 
         let config = from_args(args).unwrap();
@@ -63,6 +66,7 @@ mod tests {
             patterns: vec!["*.rs".to_string()],
             base_ref: None,
             github_output: None,
+            container_dirs: vec![],
         };
 
         let config = from_args(args).unwrap();
@@ -83,6 +87,7 @@ mod tests {
             patterns: vec!["*.rs".to_string()],
             base_ref: Some("main".to_string()),
             github_output: None,
+            container_dirs: vec![],
         };
 
         let config = from_args(args).unwrap();
@@ -103,6 +108,7 @@ mod tests {
             patterns: vec!["*.rs".to_string()],
             base_ref: None,
             github_output: None,
+            container_dirs: vec![],
         };
 
         let result = from_args(args);
@@ -125,6 +131,7 @@ mod tests {
             patterns: vec!["*.rs".to_string()],
             base_ref: None,
             github_output: None,
+            container_dirs: vec![],
         };
 
         let result = from_args(args);
@@ -141,6 +148,7 @@ mod tests {
             patterns: vec!["*.rs".to_string()],
             base_ref: Some("main".to_string()),
             github_output: Some("api".to_string()),
+            container_dirs: vec![],
         };
 
         let config = from_args(args).unwrap();
@@ -157,6 +165,7 @@ mod tests {
             patterns: vec!["*.rs".to_string()],
             base_ref: Some("main".to_string()),
             github_output: None,
+            container_dirs: vec![],
         };
 
         let config = from_args(args).unwrap();
@@ -180,6 +189,7 @@ mod tests {
             patterns: vec!["*.rs".to_string()],
             base_ref: Some("main".to_string()),
             github_output: None,
+            container_dirs: vec![],
         };
 
         let config = from_args(args).unwrap();
@@ -197,6 +207,7 @@ mod tests {
             patterns: vec!["*.rs".to_string(), "*.md".to_string()],
             base_ref: None,
             github_output: Some("my-api".to_string()),
+            container_dirs: vec![],
         };
 
         let config = from_args(args).unwrap();
@@ -212,5 +223,21 @@ mod tests {
             env::remove_var("BASE_REF");
             env::remove_var("GITHUB_OUTPUT");
         }
+    }
+
+    #[test]
+    fn test_container_dirs_passed_through() {
+        let args = Args {
+            patterns: vec![],
+            base_ref: Some("main".to_string()),
+            github_output: None,
+            container_dirs: vec!["api".to_string(), "web".to_string()],
+        };
+
+        let config = from_args(args).unwrap();
+        assert_eq!(
+            config.container_dirs,
+            vec!["api".to_string(), "web".to_string()]
+        );
     }
 }
