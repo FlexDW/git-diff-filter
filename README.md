@@ -6,9 +6,9 @@ A command-line utility for detecting changes in a monorepo by comparing git diff
 
 `gdf` analyzes git diffs to determine which parts of the code changed, helping workflows decide whether to run specific jobs or steps. Common use cases:
 
-- **Conditional Docker rebuilds** — rebuild and push a service image only when its source files (or shared dependencies) actually changed; uses the service's own `.dockerignore` to define what matters
-- **Monorepo CI gating** — skip expensive build, test, or deploy jobs for services that didn't change
-- **Glob pattern matching** — match changed files against patterns to flag which components were modified
+- **Conditional Docker rebuilds** - rebuild and push a service image only when its source files (or shared dependencies) actually changed; uses the service's own `.dockerignore` to define what matters
+- **Monorepo CI gating** - skip expensive build, test, or deploy jobs for services that didn't change
+- **Glob pattern matching** - match changed files against patterns to flag which components were modified
 
 ## Pattern Support
 
@@ -25,26 +25,23 @@ A command-line utility for detecting changes in a monorepo by comparing git diff
 - `pattern/` - Directory prefix matching (match directory and all contents)
 
 ### Not Implemented
-- `{js,ts}` - Brace expansion (**out of scope**)
-  - `{` and `}` are treated as **literal characters** — no error is thrown, but no expansion occurs
-  - `'*.{js,ts}'` will only match a file literally named `*.{js,ts}`, not `*.js` or `*.ts`
-  - Use multiple `-p` flags instead:
-    - Instead of: `gdf -p '*.{js,ts}'`
-    - Use: `gdf -p '*.js' -p '*.ts'`
+- `{js,ts}` - Brace expansion (**out of scope** - use multiple `-p` flags instead)
+  - Instead of: `gdf -p '*.{js,ts}'`
+  - Use: `gdf -p '*.js' -p '*.ts'`
 
 ## Usage
 
-**Pattern mode** — match changed files against glob patterns:
+**Pattern mode** - match changed files against glob patterns:
 ```bash
 gdf -p <glob> [-p <glob>...] [-b <base-ref>] [-g <name>]
 ```
 
-**Container mode** — detect changes inside a container directory, respecting `.dockerignore`:
+**Container mode** - detect changes inside a container directory, respecting `.dockerignore`:
 ```bash
 gdf -c <dir> [-c <dir>...] [-b <base-ref>] [-g <name>]
 ```
 
-**Combined** — true if patterns match *or* any container has changes:
+**Combined** - true if patterns match *or* any container has changes:
 ```bash
 gdf -p <glob> [-p <glob>...] -c <dir> [-c <dir>...] [-b <base-ref>] [-g <name>]
 ```
@@ -53,7 +50,7 @@ At least one `-p` or `-c` must be provided. Flags can be mixed freely.
 
 ## Conditional Docker Builds (GitHub Actions)
 
-The primary use case for `-c` is avoiding unnecessary Docker image rebuilds. `gdf` uses the service's own `.dockerignore` to decide whether any relevant file changed — the same rules Docker uses when building the image.
+The primary use case for `-c` is avoiding unnecessary Docker image rebuilds. `gdf` uses the service's own `.dockerignore` to decide whether any relevant file changed, the same rules Docker uses when building the image.
 
 ### Example repo layout
 
@@ -133,7 +130,7 @@ jobs:
           docker push myorg/worker:${{ github.sha }}
 ```
 
-**Key behaviour:** a commit that only changes `services/api/README.md` returns `false` for `api` — no rebuild triggered, because `*.md` is ignored by the `.dockerignore`. A commit that changes `libs/` returns `true` for both services.
+**Key behaviour:** a commit that only changes `services/api/README.md` returns `false` for `api` - no rebuild triggered, because `*.md` is ignored by the `.dockerignore`. A commit that changes `libs/` returns `true` for both services.
 
 > **Note:** `.dockerignore` patterns are matched against paths relative to the service directory. `*.md` matches `services/api/README.md`; use `**/*.md` to match files in subdirectories too.
 
@@ -172,7 +169,7 @@ jobs:
 
    **Pattern mode** (`-p`):
    - Separate patterns into inclusion patterns (no `!` prefix) and exclusion patterns (`!` prefix)
-   - Match all changed files against all inclusion patterns — build a deduplicated set
+   - Match all changed files against all inclusion patterns - build a deduplicated set
    - Remove from that set any file matching an exclusion pattern
    - Exclusions are order-independent and applied globally
    - Returns `true` if any files remain after exclusions
@@ -181,8 +178,8 @@ jobs:
    - For each specified `<dir>`, collect all changed files inside it (matched against `<dir>/**`)
    - If no `.dockerignore` exists in `<dir>`, that directory contributes `true` immediately if any such files exist
    - If a `.dockerignore` exists, apply its rules **in order** to the collected set:
-     - Plain pattern (e.g., `*.log`) — remove matching files from the relevant set
-     - Exception pattern (e.g., `!important.log`) — restore matching files to the relevant set
+     - Plain pattern (e.g., `*.log`) - remove matching files from the relevant set
+     - Exception pattern (e.g., `!important.log`) - restore matching files to the relevant set
      - Comments (`#`) and blank lines are ignored
    - That directory contributes `true` if any files remain in the relevant set
    - Note: `.dockerignore` `*` only matches within one directory level; use `**` for recursive matching
@@ -530,8 +527,6 @@ This format is automatically written to `$GITHUB_OUTPUT` (if the environment var
 - **Not supported**:
   - `{a,b}` - Brace expansion (OUT OF SCOPE - use multiple `-p` flags instead)
 - Matching is case-sensitive
-
-### Error Handling
 
 ### Error Handling
 
