@@ -11,8 +11,11 @@ runs:
   steps:
     - name: Download and install gdf
       shell: bash
+      env:
+        GDF_ACTION_REF: ${{ github.action_ref }}
+        GDF_ACTION_REPO: ${{ github.action_repository }}
       run: |
-        BINARY_URL="https://github.com/${{ github.action_repository }}/releases/download/${{ github.action_ref }}/gdf-linux-x86_64"
+        BINARY_URL="https://github.com/${GDF_ACTION_REPO}/releases/download/${GDF_ACTION_REF}/gdf-linux-x86_64"
         
         echo "Downloading gdf from ${BINARY_URL}"
         curl --fail -L "${BINARY_URL}" -o gdf
