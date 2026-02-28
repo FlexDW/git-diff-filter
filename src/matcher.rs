@@ -306,6 +306,11 @@ pub fn match_batch(pattern: &str, strings: &[&str]) -> Result<Vec<bool>, String>
                     }
                 }
             }
+            b'{' => {
+                return Err(format!(
+                    "Pattern '{pattern}' uses brace expansion which is not supported"
+                ));
+            }
             _ => {
                 match pattern_state {
                     PatternState::Literal => {
@@ -538,6 +543,12 @@ fn match_wildcard_segment(
                             Some(b) if b != b'/' => string_idx += 1,
                             _ => segment_matched = false,
                         }
+                    }
+                    b'{' => {
+                        return Err(format!(
+                            "Pattern '{p}' uses brace expansion which is not supported.",
+                            p = String::from_utf8_lossy(pattern)
+                        ));
                     }
                     _ => {
                         // Literal character
@@ -1498,5 +1509,32 @@ mod tests {
         )
         .unwrap();
         assert_eq!(result, vec![true, true, true, false]);
+    }
+
+    #[test]
+    fn test_brace_expansion_error() {
+        let err = match_batch("*.{js,ts}", &["file.js"]).unwrap_err();
+        assert!(err.contains("brace expansion"), "err: {err}");
+        assert!(err.contains("*.{js,ts}"), "err: {err}");
+    }
+
+    #[test]
+    fn test_brace_expansion_error_after_wildcard() {
+        // { inside a wildcard segment — caught in match_wildcard_segment
+        let err = match_batch("src/*.{js,ts}", &["src/file.js"]).unwrap_err();
+        assert!(err.contains("brace expansion"), "err: {err}");
+    }
+
+    #[test]
+    fn test_brace_expansion_error_in_middle() {
+        let err = match_batch("src/{a,b}/**", &["src/a/main.rs"]).unwrap_err();
+        assert!(err.contains("brace expansion"), "err: {err}");
+    }
+
+    #[test]
+    fn test_escaped_brace_not_error() {
+        // \{ is an escaped literal brace — must not trigger the error
+        let result = match_batch("file\\{1\\}", &["file{1}", "file{2}"]).unwrap();
+        assert_eq!(result, vec![true, false]);
     }
 }
