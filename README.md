@@ -4,7 +4,11 @@ A command-line utility for detecting changes in a monorepo by comparing git diff
 
 ## Overview
 
-`gdf` analyzes git diffs to determine which parts of the code changed, helping workflows decide whether to run specific jobs or steps. It performs glob pattern matching against git diffs to flag which components of a monorepo have been modified.
+`gdf` analyzes git diffs to determine which parts of the code changed, helping workflows decide whether to run specific jobs or steps. Common use cases:
+
+- **Conditional Docker rebuilds** — rebuild and push a service image only when its source files (or shared dependencies) actually changed; uses the service's own `.dockerignore` to define what matters
+- **Monorepo CI gating** — skip expensive build, test, or deploy jobs for services that didn't change
+- **Glob pattern matching** — match changed files against patterns to flag which components were modified
 
 ## Pattern Support
 
@@ -21,9 +25,12 @@ A command-line utility for detecting changes in a monorepo by comparing git diff
 - `pattern/` - Directory prefix matching (match directory and all contents)
 
 ### Not Implemented
-- `{js,ts}` - Brace expansion (**out of scope** - use multiple `-p` flags instead)
-  - Instead of: `gdf -p '*.{js,ts}'`
-  - Use: `gdf -p '*.js' -p '*.ts'`
+- `{js,ts}` - Brace expansion (**out of scope**)
+  - `{` and `}` are treated as **literal characters** — no error is thrown, but no expansion occurs
+  - `'*.{js,ts}'` will only match a file literally named `*.{js,ts}`, not `*.js` or `*.ts`
+  - Use multiple `-p` flags instead:
+    - Instead of: `gdf -p '*.{js,ts}'`
+    - Use: `gdf -p '*.js' -p '*.ts'`
 
 ## Usage
 
@@ -44,9 +51,95 @@ gdf -p <glob> [-p <glob>...] -c <dir> [-c <dir>...] [-b <base-ref>] [-g <name>]
 
 At least one `-p` or `-c` must be provided. Flags can be mixed freely.
 
-### Arguments and Flags
+## Conditional Docker Builds (GitHub Actions)
 
-#### Required (one of)
+The primary use case for `-c` is avoiding unnecessary Docker image rebuilds. `gdf` uses the service's own `.dockerignore` to decide whether any relevant file changed — the same rules Docker uses when building the image.
+
+### Example repo layout
+
+```
+services/
+  api/
+    .dockerignore
+    Dockerfile
+    src/
+    tests/
+  worker/
+    .dockerignore
+    Dockerfile
+    src/
+libs/           # shared code consumed by both services
+```
+
+### Example `services/api/.dockerignore`
+
+```
+# Never relevant to the image
+tests/
+*.md
+.env*
+
+# Always relevant even if otherwise ignored
+!**/*.proto
+```
+
+### Workflow
+
+```yaml
+jobs:
+  detect-changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    outputs:
+      api: ${{ steps.changes.outputs.api }}
+      worker: ${{ steps.changes.outputs.worker }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # required for git history
+
+      - uses: FlexDW/git-diff-filter@v1
+
+      - name: Detect changes
+        id: changes
+        env:
+          BASE_REF: ${{ github.event.repository.default_branch }}
+        run: |
+          gdf -g api -c 'services/api' -p 'libs/**'
+          gdf -g worker -c 'services/worker' -p 'libs/**'
+
+  build-api:
+    name: Build and push api
+    needs: detect-changes
+    if: needs.detect-changes.outputs.api == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and push
+        run: |
+          docker build -t myorg/api:${{ github.sha }} services/api/
+          docker push myorg/api:${{ github.sha }}
+
+  build-worker:
+    name: Build and push worker
+    needs: detect-changes
+    if: needs.detect-changes.outputs.worker == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and push
+        run: |
+          docker build -t myorg/worker:${{ github.sha }} services/worker/
+          docker push myorg/worker:${{ github.sha }}
+```
+
+**Key behaviour:** a commit that only changes `services/api/README.md` returns `false` for `api` — no rebuild triggered, because `*.md` is ignored by the `.dockerignore`. A commit that changes `libs/` returns `true` for both services.
+
+> **Note:** `.dockerignore` patterns are matched against paths relative to the service directory. `*.md` matches `services/api/README.md`; use `**/*.md` to match files in subdirectories too.
+
+## Arguments and Flags
+
+### Required (one of)
 
 - `-p, --pattern <glob>` - Glob pattern to match against changed files (can be specified multiple times)
   - **Note**: Wrap patterns in quotes to prevent shell expansion (e.g., `'libs/**'` not `libs/**`)
@@ -56,7 +149,7 @@ At least one `-p` or `-c` must be provided. Flags can be mixed freely.
   - With a `.dockerignore`, rules are applied in-order: plain patterns remove files from the relevant set; `!pattern` lines restore them
   - Can be combined with `-p`; the overall result is true if patterns match **or** any container has changes
 
-#### Optional Flags
+### Optional Flags
 
 - `-b, --base-ref <ref>` - The git reference to compare against (e.g., `refs/tags/production`, `main`, `HEAD~1`)
   - If not provided, it will try to use `BASE_REF` environment variable
@@ -65,13 +158,13 @@ At least one `-p` or `-c` must be provided. Flags can be mixed freely.
   - When provided, outputs in format `<name>=true|false` and writes to `$GITHUB_OUTPUT` file
   - When omitted, outputs plain `true` or `false` to stdout
 
-#### Environment Variables
+### Environment Variables
 
 - `BASE_REF` - The git reference to compare against (fallback if `--base-ref` is not provided)
   - Either `--base-ref` flag or `BASE_REF` environment variable is required
   - Command-line flag takes precedence
 
-### Behavior
+## Behavior
 
 1. Reads the base reference from `--base-ref` flag or falls back to `BASE_REF` environment variable
 2. Executes `git diff --name-only $BASE_REF..HEAD` to get list of changed files
@@ -100,7 +193,7 @@ At least one `-p` or `-c` must be provided. Flags can be mixed freely.
    - **stdout** (without `-g` flag): Outputs `true` or `false`
    - **stdout** (with `-g` flag): Outputs `<name>=true` or `<name>=false` AND writes to `$GITHUB_OUTPUT` file (if the environment variable exists)
 
-### Exit Codes
+## Exit Codes
 
 - `0` - Success (always, even if no files match)
 - `1` - Error (missing base ref, git command failed, invalid arguments, etc.)
