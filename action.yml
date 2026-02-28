@@ -23,4 +23,3 @@ runs:
         sudo mv gdf /usr/local/bin/
         
         echo "gdf installed successfully"
-        gdf --version
