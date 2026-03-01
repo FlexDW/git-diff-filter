@@ -1,14 +1,43 @@
 # `gdf`
 
-A command-line utility for detecting changes in a monorepo by comparing git diffs against glob patterns. Designed to integrate seamlessly with GitHub Actions workflows but works in any CI/CD environment or local development.
+A single, zero-dependency binary that checks a git diff against glob patterns and tells your CI whether to run a job.
 
-## Overview
+Point it at a container directory `-c` and it reads the service's own `.dockerignore` to apply the same rules Docker uses at build time, or use any glob pattern with `-p`.
 
-`gdf` analyzes git diffs to determine which parts of the code changed, helping workflows decide whether to run specific jobs or steps. Common use cases:
+```yaml
+# .github/workflows/ci.yml
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      api: ${{ steps.diff.outputs.api }}
+      worker: ${{ steps.diff.outputs.worker }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: FlexDW/git-diff-filter@v1
+      - id: diff
+        env: { BASE_REF: main }
+        run: |
+          gdf -g api    -c services/api    -p 'libs/**'
+          gdf -g worker -c services/worker -p 'libs/**'
 
-- **Conditional Docker rebuilds** - rebuild and push a service image only when its source files (or shared dependencies) actually changed; uses the service's own `.dockerignore` to define what matters
-- **Monorepo CI gating** - skip expensive build, test, or deploy jobs for services that didn't change
-- **Glob pattern matching** - match changed files against patterns to flag which components were modified
+  build-api:
+    needs: changes
+    if: needs.changes.outputs.api
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t myorg/api services/api/
+
+  build-worker:
+    needs: changes
+    if: needs.changes.outputs.worker
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t myorg/worker services/worker/
+```
 
 ## Pattern Support
 
@@ -108,7 +137,7 @@ jobs:
   build-api:
     name: Build and push api
     needs: detect-changes
-    if: needs.detect-changes.outputs.api == 'true'
+    if: needs.detect-changes.outputs.api
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -120,7 +149,7 @@ jobs:
   build-worker:
     name: Build and push worker
     needs: detect-changes
-    if: needs.detect-changes.outputs.worker == 'true'
+    if: needs.detect-changes.outputs.worker
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -130,7 +159,7 @@ jobs:
           docker push myorg/worker:${{ github.sha }}
 ```
 
-**Key behaviour:** a commit that only changes `services/api/README.md` returns `false` for `api` - no rebuild triggered, because `*.md` is ignored by the `.dockerignore`. A commit that changes `libs/` returns `true` for both services.
+**Key behaviour:** a commit that only changes `services/api/README.md` leaves the `api` output unset (no rebuild triggered), because `*.md` is ignored by the `.dockerignore`. A commit that changes `libs/` sets both outputs to `true`.
 
 > **Note:** `.dockerignore` patterns are matched against paths relative to the service directory. `*.md` matches `services/api/README.md`; use `**/*.md` to match files in subdirectories too.
 
@@ -152,7 +181,9 @@ jobs:
   - If not provided, it will try to use `BASE_REF` environment variable
   - Command-line flag takes precedence over environment variable
 - `-g, --github-output <name>` - Enable GitHub Actions integration by specifying the output variable name
-  - When provided, outputs in format `<name>=true|false` and writes to `$GITHUB_OUTPUT` file
+  - When a match is found, outputs `<name>=true` and writes to `$GITHUB_OUTPUT` file
+  - When no match is found, nothing is written — the output stays unset (empty string in Actions, which is falsy)
+  - This allows bare `if:` checks in workflows without `== 'true'` comparisons
   - When omitted, outputs plain `true` or `false` to stdout
 
 ### Environment Variables
@@ -188,7 +219,7 @@ jobs:
 
 4. Output:
    - **stdout** (without `-g` flag): Outputs `true` or `false`
-   - **stdout** (with `-g` flag): Outputs `<name>=true` or `<name>=false` AND writes to `$GITHUB_OUTPUT` file (if the environment variable exists)
+   - **stdout** (with `-g` flag): Only writes when there is a match — outputs `<name>=true` and writes to `$GITHUB_OUTPUT` file (if the environment variable exists). When there is no match, nothing is written; the output stays unset (falsy in GitHub Actions).
 
 ## Exit Codes
 
@@ -208,8 +239,10 @@ gdf -p 'services/admin/**' -b refs/tags/production
 
 ```bash
 gdf -g admin-api -p 'services/admin/**' -b refs/tags/production
-# stdout: admin-api=true
-# Writes to $GITHUB_OUTPUT: admin-api=true
+# If match found:
+#   stdout: admin-api=true
+#   Writes to $GITHUB_OUTPUT: admin-api=true
+# If no match: nothing is written (output stays unset / falsy)
 ```
 
 ### Using Environment Variable for Base Ref
@@ -273,8 +306,8 @@ gdf -p 'libs/**' -c 'services/api' -c 'services/web' -b main
 
 ```bash
 gdf -g api-service -c 'services/api' -b main
-# stdout: api-service=true
-# Writes to $GITHUB_OUTPUT: api-service=true
+# If match: stdout: api-service=true, writes to $GITHUB_OUTPUT
+# If no match: nothing is written (output stays unset / falsy)
 ```
 
 ### Root-Anchored Patterns
@@ -445,7 +478,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Build ${{ matrix.component }}
-        if: needs.setup.outputs[matrix.component] == 'true'
+        if: needs.setup.outputs[matrix.component]
         run: npm run build:${{ matrix.component }}
 ```
 
@@ -469,19 +502,19 @@ Useful for scripts, shell conditionals, or any non-GitHub Actions environment.
 
 ### GitHub Actions Mode
 
-With the `-g <name>` flag, outputs in GitHub Actions format:
+With the `-g <name>` flag, output is only written when there is a match:
 
 ```
 <name>=true
 ```
 
-or
+When there is no match, nothing is written. The output remains unset, which defaults to an empty string in GitHub Actions — a falsy value. This allows bare `if:` checks in workflow conditionals:
 
-```
-<name>=false
+```yaml
+if: needs.detect-changes.outputs.my-service
 ```
 
-This format is automatically written to `$GITHUB_OUTPUT` (if the environment variable exists) and can be used in workflow conditionals via `steps.<step-id>.outputs.<name>`.
+The output is automatically written to `$GITHUB_OUTPUT` (if the environment variable exists) and can be referenced via `steps.<step-id>.outputs.<name>`.
 
 ## Implementation Notes
 
@@ -622,6 +655,14 @@ If you prefer manual installation:
     curl -L https://github.com/FlexDW/git-diff-filter/releases/latest/download/gdf-linux-x86_64 -o gdf
     sudo mv gdf /usr/local/bin/
     chmod +x /usr/local/bin/gdf
+```
+
+### Vendor in Your Repository
+
+Since `gdf` is a single static binary, you can download it once and commit it directly into your repo (e.g., `bin/gdf`). This removes any external download step from your workflows:
+
+```yaml
+- run: ./bin/gdf -g api -c services/api
 ```
 
 ### Build from Source

@@ -3,25 +3,28 @@
 use std::fs::OpenOptions;
 use std::io::Write;
 
-/// Write the match result to stdout and optionally to `GITHUB_OUTPUT` file
+/// Write the match result to stdout and optionally to `GITHUB_OUTPUT` file.
+///
+/// In GitHub Actions mode (when `output_name` is set), only writes when
+/// `has_match` is true. Unset outputs default to empty string in Actions,
+/// which is falsy — allowing bare `if:` checks without `== 'true'`.
 pub fn write_output(
     has_match: bool,
     output_name: Option<&str>,
     github_output_filepath: Option<&str>,
 ) -> Result<(), String> {
-    let result = if has_match { "true" } else { "false" };
-
     if let Some(name) = output_name {
-        // GitHub Actions output mode: <name>=<result>
-        let output_line = format!("{name}={result}");
-        println!("{output_line}");
+        if has_match {
+            let output_line = format!("{name}=true");
+            println!("{output_line}");
 
-        // Write to GITHUB_OUTPUT file if path is set
-        if let Some(filepath) = github_output_filepath {
-            write_to_file(filepath, &output_line)?;
+            if let Some(filepath) = github_output_filepath {
+                write_to_file(filepath, &output_line)?;
+            }
         }
     } else {
-        // Plain output mode: just true/false
+        // Plain output mode: always print true/false
+        let result = if has_match { "true" } else { "false" };
         println!("{result}");
     }
 
@@ -111,16 +114,24 @@ mod tests {
     }
 
     #[test]
-    fn test_write_output_github_mode_no_file() {
-        // GitHub mode: name provided, but no file path
+    fn test_write_output_github_mode_no_file_true() {
+        // GitHub mode: name provided, match found, no file path
         let result = write_output(true, Some("changed"), None);
         assert!(result.is_ok());
-        // Would print "changed=true" to stdout (can't easily test in unit test)
+        // Would print "changed=true" to stdout
     }
 
     #[test]
-    fn test_write_output_github_mode_with_file() {
-        let path = temp_file_path("github_output");
+    fn test_write_output_github_mode_no_file_false() {
+        // GitHub mode: name provided, no match, no file path
+        let result = write_output(false, Some("changed"), None);
+        assert!(result.is_ok());
+        // Should not print anything — output stays unset (falsy in Actions)
+    }
+
+    #[test]
+    fn test_write_output_github_mode_with_file_true() {
+        let path = temp_file_path("github_output_true");
         cleanup(&path);
 
         let result = write_output(true, Some("changed"), Some(path.to_str().unwrap()));
@@ -128,6 +139,20 @@ mod tests {
 
         let content = fs::read_to_string(&path).unwrap();
         assert_eq!(content, "changed=true\n");
+
+        cleanup(&path);
+    }
+
+    #[test]
+    fn test_write_output_github_mode_with_file_false() {
+        let path = temp_file_path("github_output_false");
+        cleanup(&path);
+
+        let result = write_output(false, Some("changed"), Some(path.to_str().unwrap()));
+        assert!(result.is_ok());
+
+        // File should not be created when there's no match
+        assert!(!path.exists());
 
         cleanup(&path);
     }
@@ -141,7 +166,8 @@ mod tests {
         write_output(false, Some("second"), Some(path.to_str().unwrap())).unwrap();
 
         let content = fs::read_to_string(&path).unwrap();
-        assert_eq!(content, "first=true\nsecond=false\n");
+        // Only "first=true" should be written; "second" had no match so nothing written
+        assert_eq!(content, "first=true\n");
 
         cleanup(&path);
     }
